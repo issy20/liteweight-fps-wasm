@@ -3,11 +3,6 @@ use serde::{Deserialize, Serialize};
 
 const RENDER_SCALES: [f32; 4] = [0.5, 0.67, 0.75, 1.0];
 const FPS_LIMITS: [u16; 7] = [30, 60, 90, 120, 144, 240, 0];
-const MOUSE_DPI_MIN: u32 = 100;
-const MOUSE_DPI_MAX: u32 = 6400;
-const MOUSE_DPI_STEP: u32 = 100;
-/// Radians of view rotation per unit of raw mouse movement, before sensitivity.
-const RADIANS_PER_MOUSE_UNIT: f32 = 0.002;
 
 /// Crosshair palette selectable in the settings menu.
 pub const CROSSHAIR_COLORS: [&str; 6] = ["WHITE", "GREEN", "CYAN", "YELLOW", "ORANGE", "RED"];
@@ -298,8 +293,6 @@ pub struct GameSettings {
     pub crosshair_thickness: f32,
     /// Whether the center dot is drawn.
     pub crosshair_dot: bool,
-    /// Mouse DPI, used only for the cm/360 readout.
-    pub mouse_dpi: u32,
 }
 
 impl Default for GameSettings {
@@ -326,7 +319,6 @@ impl Default for GameSettings {
             crosshair_gap: 1.0,
             crosshair_thickness: 1.0,
             crosshair_dot: true,
-            mouse_dpi: 800,
         }
     }
 }
@@ -364,15 +356,6 @@ impl GameSettings {
             thickness: 0.003 * self.crosshair_thickness,
             dot: self.crosshair_dot,
         }
-    }
-
-    /// Hip-fire centimeters of mouse travel for a full 360-degree turn.
-    ///
-    /// `cm = (2π / (radians_per_unit * sensitivity)) / dpi * 2.54`.
-    pub fn cm_per_360(&self) -> f32 {
-        let sensitivity = self.mouse_sensitivity.max(f32::EPSILON);
-        let dpi = self.mouse_dpi.max(1) as f32;
-        (std::f32::consts::TAU * 2.54) / (RADIANS_PER_MOUSE_UNIT * sensitivity * dpi)
     }
 
     pub fn toggle_setting(&mut self, setting: usize) {
@@ -438,11 +421,6 @@ impl GameSettings {
         } else if setting == 15 && direction != 0.0 {
             self.crosshair_color = (i16::from(self.crosshair_color) + direction.signum() as i16)
                 .rem_euclid(CROSSHAIR_COLORS.len() as i16) as u8;
-        } else if setting == 16 && direction != 0.0 {
-            let delta = direction.signum() as i32 * MOUSE_DPI_STEP as i32;
-            self.mouse_dpi = (self.mouse_dpi as i32 + delta)
-                .clamp(MOUSE_DPI_MIN as i32, MOUSE_DPI_MAX as i32)
-                as u32;
         }
     }
 
@@ -466,7 +444,6 @@ impl GameSettings {
             || !(0.5..=2.0).contains(&settings.crosshair_size)
             || !(0.0..=2.0).contains(&settings.crosshair_gap)
             || !(0.5..=2.0).contains(&settings.crosshair_thickness)
-            || !(MOUSE_DPI_MIN..=MOUSE_DPI_MAX).contains(&settings.mouse_dpi)
             || !settings.key_bindings.are_unique()
         {
             return Self::default();
@@ -759,27 +736,12 @@ mod tests {
     }
 
     #[test]
-    fn cm_per_360_halves_when_sensitivity_doubles() {
-        let base = GameSettings {
-            mouse_sensitivity: 1.0,
-            mouse_dpi: 800,
-            ..GameSettings::default()
-        };
-        assert!((base.cm_per_360() - 9.974).abs() < 0.05);
-        let twice = GameSettings {
-            mouse_sensitivity: 2.0,
-            ..base
-        };
-        assert!((twice.cm_per_360() - base.cm_per_360() / 2.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn crosshair_and_dpi_adjustments_are_bounded() {
+    fn crosshair_adjustments_are_bounded() {
         let mut settings = GameSettings::default();
         settings.adjust_setting(12, 1.0);
         assert!(settings.crosshair_size > 1.0);
-        settings.adjust_setting(16, -1.0);
-        assert_eq!(settings.mouse_dpi, 700);
+        settings.adjust_setting(15, 1.0);
+        assert_eq!(settings.crosshair_color, 1);
         settings.toggle_setting(3);
         assert!(!settings.crosshair_dot);
     }

@@ -472,7 +472,7 @@ pub fn settings_overlay(
         aspect,
     );
 
-    let visible = settings_visible_range(selected, 24);
+    let visible = settings_visible_range(selected, 23);
     for (row, setting_index) in visible.clone().enumerate() {
         let center = SETTINGS_ROW_TOP - row as f32 * SETTINGS_ROW_GAP - 0.02;
         let height = 0.070;
@@ -512,7 +512,6 @@ pub fn settings_overlay(
         (13, (settings.crosshair_size - 0.5) / 1.5),
         (14, settings.crosshair_gap / 2.0),
         (15, (settings.crosshair_thickness - 0.5) / 1.5),
-        (17, (settings.mouse_dpi.saturating_sub(100) as f32) / 6300.0),
     ] {
         let Some(row) = visible.clone().position(|index| index == setting_index) else {
             continue;
@@ -656,11 +655,7 @@ pub fn settings_text_with_bindings_into(
         ),
         (
             "MOUSE SENSITIVITY".to_owned(),
-            format!(
-                "{:.2}  {:.1}CM/360",
-                settings.mouse_sensitivity,
-                settings.cm_per_360()
-            ),
+            format!("{:.2}", settings.mouse_sensitivity),
         ),
         (
             "ADS SENSITIVITY".to_owned(),
@@ -723,10 +718,6 @@ pub fn settings_text_with_bindings_into(
         (
             "CROSSHAIR DOT".to_owned(),
             if settings.crosshair_dot { "ON" } else { "OFF" }.to_owned(),
-        ),
-        (
-            "MOUSE DPI".to_owned(),
-            format!("{} DPI", settings.mouse_dpi),
         ),
         ("BOT COUNT".to_owned(), settings.bot_count.to_string()),
         ("BOT BEHAVIOR".to_owned(), behavior.to_owned()),
@@ -2004,15 +1995,15 @@ mod tests {
     #[test]
     fn settings_scroll_window_keeps_selection_visible_at_each_end() {
         assert_eq!(SETTINGS_VISIBLE_ROWS, 11);
-        assert_eq!(settings_visible_range(0, 24), 0..11);
-        assert_eq!(settings_visible_range(10, 24), 5..16);
-        assert_eq!(settings_visible_range(23, 24), 13..24);
+        assert_eq!(settings_visible_range(0, 23), 0..11);
+        assert_eq!(settings_visible_range(10, 23), 5..16);
+        assert_eq!(settings_visible_range(22, 23), 12..23);
     }
 
     #[test]
     fn change_mode_row_remains_visible_and_highlighted() {
         let settings = crate::persistence::GameSettings::default();
-        let change_mode = settings_text_with_bindings(&settings, 23, [1280, 720], false, 0, false);
+        let change_mode = settings_text_with_bindings(&settings, 22, [1280, 720], false, 0, false);
         assert!(change_mode
             .vertices
             .iter()
@@ -2355,7 +2346,7 @@ mod tests {
     fn resume_and_change_mode_highlights_cover_the_full_text_height() {
         for (selected, expected_min_y, expected_max_y, color) in [
             (0, 0.44, 0.50, [0.92, 0.48, 0.16, 0.22]),
-            (23, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
+            (22, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
         ] {
             let mut mesh = crate::Scene {
                 vertices: Vec::new(),
