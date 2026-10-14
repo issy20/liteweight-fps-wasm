@@ -103,6 +103,9 @@ index.html / Trunk.toml         ホストページとビルド設定
 - ネイティブ（テスト用）: OS 標準の設定ディレクトリへアトミック書き込み。
 - ロード時 `from_json` で値域検証し、不正なら既定値へフォールバック。
   `#[serde(default)]` のため未知キーは無視され、欠落フィールドは既定値になる。
+- ベスト記録 `Records`（モード別の `kills` / `accuracy` / `headshot_rate`）は別キー
+  `liteweight-fps/records.json` に保存。`submit` は指標ごとに最大値を保持し、改善が
+  あれば `true` を返す。
 
 ---
 
@@ -343,8 +346,12 @@ index.html / Trunk.toml         ホストページとビルド設定
 
 ## 9. 戦闘（simulation/combat.rs）
 
-- `Combat` は `targets: Vec<Bot>`、`last_shot`、`feedback`、`kills` を保持。
+- `Combat` は `targets: Vec<Bot>`、`last_shot`、`feedback`、`kills`、
+  `shots_fired` / `hits` / `headshots`（セッション統計）を保持。
 - 射程は既定 100。
+- 統計: 発射ごとに `shots_fired` を加算、BOT にダメージを与えたら `hits`、ヘッドショットなら
+  `headshots` を加算。`accuracy() = hits/shots_fired`、`headshot_rate() = headshots/hits`
+  （0 除算は 0.0）。
 - 通常射撃 `shoot(origin, direction, walls, damage)`:
   壁と全 BOT 判定のうち最近傍を選び、BOT 命中時はダメージ適用（ヘッドショット 2 倍）。
 - 銃口射撃 `shoot_from_muzzle_with_aim(...)`（実ゲームで使用）:
@@ -417,11 +424,13 @@ index.html / Trunk.toml         ホストページとビルド設定
 
 ### 12.1 ゲーム HUD（テキスト）
 上端にモード名（`FREE TRAINING` / `TRACKING AIM`）、その下に
-`武器名  AMMO x/y（無限時は ∞）  KILLS n`。下端に移動・射撃・リロード・武器・ポーズの
-キーガイド（現在のバインドを反映）。
+`武器名  AMMO x/y（無限時は ∞）  KILLS n  ACC nn%  HS nn%`（ACC=命中率、
+HS=ヘッドショット率）。下端に移動・射撃・リロード・武器・ポーズのキーガイド
+（現在のバインドを反映）。
 
 ### 12.2 HUD メッシュ
-- 武器モデル（武器ごとに形状・色を変える）、スナイパーのスコープ、レティクル、
+- 武器モデル（武器ごとに形状・色を変える）、スナイパーのスコープ、レティクル
+  （`crosshair_style()` の色・長さ・間隔・太さ・ドットを反映）、
   マズルフラッシュ、命中マーカー、弾数 7 セグ数字（無限時は非表示）、
   リロード/ボルト進行バー。
 - 命中マーカーは `hit_marker_strength` で太さ/長さをスケール。
@@ -437,7 +446,7 @@ index.html / Trunk.toml         ホストページとビルド設定
 - 選択項目をオレンジでハイライト。
 
 ### 12.5 ポーズ／設定メニュー
-- 18 行、スクロール窓（同時表示 11 行、行間 0.095、上端 0.49）。
+- 23 行、スクロール窓（同時表示 11 行、行間 0.095、上端 0.49）。
 - 行一覧（インデックス順）:
 
 | # | ラベル | 種別 | 対応設定 |
@@ -454,15 +463,21 @@ index.html / Trunk.toml         ホストページとビルド設定
 | 9 | INFINITE AMMO | トグル | toggle 0 |
 | 10 | SOUND VOLUME | 調整 | adjust 5 |
 | 11 | HIT MARKER STRENGTH | 調整 | adjust 11 |
-| 12 | BOT COUNT | 調整 | adjust 3 |
-| 13 | BOT BEHAVIOR | 調整 | adjust 4 |
-| 14 | BOT HP | 調整 | adjust 6 |
-| 15 | BOT SPEED | 調整 | adjust 7 |
-| 16 | BOT RESPAWN | 調整 | adjust 8 |
-| 17 | CHANGE MODE / BACK TO MENU | 実行 | モード変更/戻る |
+| 12 | CROSSHAIR COLOR | 調整 | adjust 15 |
+| 13 | CROSSHAIR SIZE | 調整 | adjust 12 |
+| 14 | CROSSHAIR GAP | 調整 | adjust 13 |
+| 15 | CROSSHAIR THICKNESS | 調整 | adjust 14 |
+| 16 | CROSSHAIR DOT | トグル | toggle 3 |
+| 17 | BOT COUNT | 調整 | adjust 3 |
+| 18 | BOT BEHAVIOR | 調整 | adjust 4 |
+| 19 | BOT HP | 調整 | adjust 6 |
+| 20 | BOT SPEED | 調整 | adjust 7 |
+| 21 | BOT RESPAWN | 調整 | adjust 8 |
+| 22 | CHANGE MODE / BACK TO MENU | 実行 | モード変更/戻る |
 
 - 左/右で調整、Enter で決定（トグル/実行）、Home で既定値へ戻す。
-- スライダー表示: MOUSE SENSITIVITY / ADS SENSITIVITY / SOUND VOLUME / HIT MARKER STRENGTH。
+- スライダー表示: MOUSE SENSITIVITY / ADS SENSITIVITY / SOUND VOLUME /
+  HIT MARKER STRENGTH / CROSSHAIR SIZE / CROSSHAIR GAP / CROSSHAIR THICKNESS。
 
 ### 12.6 通知（Notice）
 - メッセージは画面中央付近にオレンジで表示し、8 秒で消える。内容:
@@ -479,6 +494,15 @@ index.html / Trunk.toml         ホストページとビルド設定
   （中心 y=+0.055、サイズ 0.05、金色）とサブタイトル（中心 y=-0.055、サイズ 0.022、淡色）を
   縦センター揃えで描く。テキストは §4.2 の状態に応じて切り替える。
 - HUD メッシュの末尾に追記して描画するため、武器モデル等の上に重なる。
+
+### 12.8 リザルト画面
+- ポーズメニューで `CHANGE MODE`（セッション中）を選ぶと表示する。`result_screen` 中は
+  シミュレーションを停止し、タイトル/設定とは排他。
+- `result_overlay(mesh, aspect)`: 減光＋中央パネル（`x=-0.42..0.42`、`y=-0.36..0.30`）。
+- `result_text(mesh, info, viewport)`: 先頭で `mesh.clear()`。`SESSION RESULT`、モード名、
+  `KILLS / ACCURACY / HEADSHOTS / TIME`（縦センター揃え・0.07 間隔）、
+  ベスト更新時は `NEW BEST`、最下段に `PRESS ENTER FOR TITLE`。
+- Enter / Esc でタイトルへ戻る。
 
 ---
 
@@ -502,14 +526,20 @@ index.html / Trunk.toml         ホストページとビルド設定
 | `bot_hp` | 100 | 50〜200（±10） | 有効 |
 | `bot_speed` | 1.0 | 0.5〜2.0（±0.1） | 有効 |
 | `bot_respawn_seconds` | 2.0 | 0.5〜10（±0.25） | 有効 |
+| `crosshair_color` | 0 | 0〜5（WHITE/GREEN/CYAN/YELLOW/ORANGE/RED） | 有効 |
+| `crosshair_size` | 1.0 | 0.5〜2.0（±0.1） | 有効 |
+| `crosshair_gap` | 1.0 | 0.0〜2.0（±0.1） | 有効 |
+| `crosshair_thickness` | 1.0 | 0.5〜2.0（±0.1） | 有効 |
+| `crosshair_dot` | true | on/off | 有効 |
 
 ### 13.1 インデックス空間
 - 調整インデックス（`adjust_setting`）:
   `0` マウス感度 / `1` ADS 感度 / `2` FOV / `3` BOT 数 / `4` BOT 挙動 /
   `5` 音量 / `6` BOT HP / `7` BOT 速度 / `8` BOT リスポーン /
-  `9` 内部解像度 / `10` FPS 制限 / `11` ヒットマーカー強度。
+  `9` 内部解像度 / `10` FPS 制限 / `11` ヒットマーカー強度 /
+  `12` クロスヘア長 / `13` クロスヘア間隔 / `14` クロスヘア太さ / `15` クロスヘア色。
 - トグルインデックス（`toggle_setting`）:
-  `0` 無限弾薬 / `1` フルスクリーン / `2` Y 反転。
+  `0` 無限弾薬 / `1` フルスクリーン / `2` Y 反転 / `3` クロスヘアドット。
 
 ### 13.2 削除された設定（Web では不要）
 - **DISPLAY RESOLUTION**: キャンバスが常にビューポート全体のため `request_inner_size` が
@@ -593,7 +623,7 @@ trunk build --release
 
 ## 17. テスト
 
-- ネイティブ `cargo test` で純粋ロジックを検証（現状 42 件）。
+- ネイティブ `cargo test` で純粋ロジックを検証（現状 48 件）。
   対象: game_mode、weapon/combat/bot のロジック、ui のジオメトリ（タイトル／設定／
   捕捉待ちオーバーレイを含む）、persistence（ファイル経路）、audio（合成）、
   text（アトラス）、physics など。
