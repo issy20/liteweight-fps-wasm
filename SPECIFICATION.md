@@ -132,6 +132,10 @@ index.html / Trunk.toml         ホストページとビルド設定
 
 - ポーズキー（既定 Esc）または Esc で、プレイ→ポーズ、ポーズ→復帰/戻る。
 - ホームキー（ポーズ中）で設定を既定へ戻し、実行時設定を再適用する。
+- Web ではポインタロック中に Esc を押すとブラウザがロック解除のために消費し、押下は
+  ページに届かない。そのため「ポインタロックの喪失」自体をポーズ要求として扱い、
+  プレイ中は **Esc 1 回でポーズ（設定）メニューが開く**（§5.1 のロック喪失検知）。
+- ポーズ中（未捕捉）の Esc は通常のキー入力として届くので、そのまま復帰/戻るに使う。
 
 #### 捕捉待ち（Click to Play / Paused）
 - 条件: プレイ中（タイトルでも設定メニューでもない）かつ `captured == false`。
@@ -174,6 +178,12 @@ index.html / Trunk.toml         ホストページとビルド設定
 - カーソル表示: 捕捉成功時に `set_cursor_visible(false)`、解除（`release_capture`）時に
   `set_cursor_grab(None)` と `set_cursor_visible(true)`。Web ではポインタロックが
   カーソルを隠すため、捕捉中は実質非表示となる。
+- 成否の検証: `set_cursor_grab(Locked)` は Web では成否を返さないため、`try_capture` は
+  要求のみを行い、`poll_capture` が毎フレーム `document.pointerLockElement` を確認して
+  `captured` を確定する（1200ms でタイムアウト）。
+- ロック喪失: ブラウザがロックを解除した（例: Esc）ことを `poll_capture` が検知したら、
+  プレイ中なら自動的にポーズメニューを開く（`open_pause_menu`）。これにより Web でも
+  Esc 1 回でポーズできる。
 - 捕捉中の相対移動で視点更新:
   `yaw += dx * 0.002 * look_multiplier`、
   `pitch = clamp(pitch - dy * 0.002 * look_multiplier * y_sign, -1.55, 1.55)`。

@@ -10,7 +10,7 @@ use crate::{
         text::TextMesh,
         window::WindowRenderer,
     },
-    persistence::{BindingAction, BindingKey, GameSettings},
+    persistence::{BindingAction, BindingKey, GameSettings, ModeRecord, Records},
     physics::Aabb,
     platform::{Duration, Instant},
     simulation::{
@@ -208,6 +208,11 @@ struct App {
     settings: GameSettings,
     tracking_bot_count: u32,
     session: SessionMode,
+    records: Records,
+    session_started: Option<Instant>,
+    result_screen: bool,
+    result_new_best: bool,
+    result_seconds: f32,
     title_screen: bool,
     settings_menu: bool,
     settings_from_title: bool,
@@ -219,6 +224,8 @@ struct App {
     title: String,
     capture_requested: bool,
     captured: bool,
+    capture_attempt: bool,
+    capture_deadline: Option<Instant>,
     window_focused: bool,
     fixed: FixedStep,
     next_frame_deadline: Option<Instant>,
@@ -331,23 +338,51 @@ impl App {
         }
     }
     /// Retries capture when requested. Expected to run after focus is settled.
+    /// Requests a pointer lock. Web browsers grant it asynchronously and may
+    /// reject it (for example right after an Esc that exited the lock), so the
+    /// result is verified later by [`Self::poll_capture`] rather than assumed.
     fn try_capture(&mut self) {
-        if !self.capture_requested || self.captured {
+        if !self.capture_requested || self.captured || self.capture_attempt {
             return;
         }
         let Some(r) = &self.renderer else {
             return;
         };
-        let result = r
-            .window
-            .set_cursor_grab(CursorGrabMode::Locked)
-            .or_else(|_| r.window.set_cursor_grab(CursorGrabMode::Confined));
-        match result {
-            Ok(()) => {
-                r.window.set_cursor_visible(false);
+        let _ = r.window.set_cursor_grab(CursorGrabMode::Locked);
+        self.capture_attempt = true;
+        self.capture_deadline = Some(Instant::now() + Duration::from_millis(1200));
+    }
+    /// Confirms the pointer lock state from the browser and updates `captured`.
+    fn poll_capture(&mut self) {
+        if !self.captured && !self.capture_attempt {
+            return;
+        }
+        let locked = web_sys::window()
+            .and_then(|window| window.document())
+            .is_some_and(|document| document.pointer_lock_element().is_some());
+        if locked {
+            if !self.captured {
                 self.captured = true;
+                if let Some(r) = &self.renderer {
+                    r.window.set_cursor_visible(false);
+                }
             }
-            Err(e) => console_error(&format!("cursor grab failed: {e}")),
+            self.capture_attempt = false;
+            self.capture_deadline = None;
+        } else if self.captured {
+            // The browser dropped the lock. On the web the Escape key is
+            // consumed by the browser to exit pointer lock and never reaches the
+            // page, so treat the lock loss itself as the pause request and open
+            // the menu to keep it a single key press.
+            self.captured = false;
+            self.open_pause_menu();
+        } else if self
+            .capture_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.capture_attempt = false;
+            self.capture_deadline = None;
+            console_log("pointer lock was not granted; click to retry");
         }
     }
     fn release_capture(&mut self) {
@@ -356,10 +391,23 @@ impl App {
             r.window.set_cursor_visible(true);
         }
         self.captured = false;
+        self.capture_attempt = false;
+        self.capture_deadline = None;
         self.input = Input::default();
         self.fire_input.clear();
         self.fixed = FixedStep::new(60, 5);
         self.clock = Instant::now();
+    }
+    /// Opens the pause/settings menu. No-op unless a session is in progress.
+    fn open_pause_menu(&mut self) {
+        if self.title_screen || self.settings_menu || self.result_screen {
+            return;
+        }
+        self.capture_requested = false;
+        self.release_capture();
+        self.pause_selection = PauseSelection::default();
+        self.settings_from_title = false;
+        self.settings_menu = true;
     }
     fn resume_from_pause(&mut self) {
         self.save_settings();
@@ -371,13 +419,45 @@ impl App {
             self.release_capture();
             return;
         }
-        self.capture_requested = true;
-        self.try_capture();
+        // Browsers reject pointer-lock requests right after Esc exits the lock,
+        // so do not retry from the key press itself. `captured` stays false and
+        // the on-screen "click to play" prompt re-acquires the lock from a click.
+        self.capture_requested = false;
     }
     fn change_mode(&mut self) {
         self.save_settings();
         self.settings_menu = false;
         self.settings_from_title = false;
+        self.title_screen = true;
+        self.title_selection = TitleSelection::default();
+        self.capture_requested = false;
+        self.release_capture();
+    }
+    /// Ends the current session: shows a result summary and updates best records.
+    fn end_session(&mut self) {
+        self.save_settings();
+        let seconds = self
+            .session_started
+            .map_or(0.0, |started| started.elapsed().as_secs_f64() as f32);
+        let result = ModeRecord {
+            kills: self.combat.kills,
+            accuracy: self.combat.accuracy(),
+            headshot_rate: self.combat.headshot_rate(),
+        };
+        self.result_new_best = self.records.submit(self.session, result);
+        if let Err(error) = self.records.save() {
+            self.set_notice("RESULTS NOT SAVED - CHECK STORAGE", &error);
+        }
+        self.result_seconds = seconds;
+        self.settings_menu = false;
+        self.settings_from_title = false;
+        self.capture_requested = false;
+        self.release_capture();
+        self.result_screen = true;
+    }
+    /// Returns to the title screen after reviewing a session result.
+    fn finish_result(&mut self) {
+        self.result_screen = false;
         self.title_screen = true;
         self.title_selection = TitleSelection::default();
         self.capture_requested = false;
@@ -425,6 +505,10 @@ impl App {
         self.title_screen = false;
         self.settings_menu = false;
         self.settings_from_title = false;
+        self.result_screen = false;
+        self.result_new_best = false;
+        self.result_seconds = 0.0;
+        self.session_started = Some(Instant::now());
         self.capture_requested = true;
         self.try_capture();
         self.clock = Instant::now();
@@ -707,7 +791,8 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 self.window_focused = true;
                 let pressed = event.state == ElementState::Pressed;
-                let gameplay_active = !self.title_screen && !self.settings_menu;
+                let gameplay_active =
+                    !self.title_screen && !self.settings_menu && !self.result_screen;
                 if self.waiting_for_binding {
                     if pressed && !event.repeat {
                         if let PhysicalKey::Code(code) = event.physical_key {
@@ -725,6 +810,14 @@ impl ApplicationHandler for App {
                                     self.set_notice("KEY ALREADY IN USE", "Choose another key");
                                 }
                             }
+                        }
+                    }
+                } else if self.result_screen {
+                    if pressed && !event.repeat {
+                        if let PhysicalKey::Code(KeyCode::Enter | KeyCode::Escape) =
+                            event.physical_key
+                        {
+                            self.finish_result();
                         }
                     }
                 } else {
@@ -770,13 +863,7 @@ impl ApplicationHandler for App {
                             if self.settings_menu {
                                 self.resume_from_pause();
                             } else {
-                                self.capture_requested = false;
-                                self.release_capture();
-                                if !self.title_screen {
-                                    self.pause_selection = PauseSelection::default();
-                                    self.settings_from_title = false;
-                                    self.settings_menu = true;
-                                }
+                                self.open_pause_menu();
                             }
                         }
                         PhysicalKey::Code(KeyCode::Enter)
@@ -784,7 +871,13 @@ impl ApplicationHandler for App {
                         {
                             match self.pause_selection.activate() {
                                 Some(PauseMenuAction::Resume) => self.resume_from_pause(),
-                                Some(PauseMenuAction::ChangeMode) => self.change_mode(),
+                                Some(PauseMenuAction::ChangeMode) => {
+                                    if self.settings_from_title {
+                                        self.change_mode();
+                                    } else {
+                                        self.end_session();
+                                    }
+                                }
                                 None => {
                                     if self.pause_selection.selected_index() == 5 {
                                         self.waiting_for_binding = true;
@@ -961,10 +1054,12 @@ impl ApplicationHandler for App {
                 if !self.renderer.as_ref().is_some_and(|r| r.drawable()) {
                     return;
                 }
+                self.poll_capture();
                 let now = Instant::now();
                 let dt = now.duration_since(self.clock).as_secs_f64();
                 self.clock = now;
-                let gameplay_active = !self.title_screen && !self.settings_menu;
+                let gameplay_active =
+                    !self.title_screen && !self.settings_menu && !self.result_screen;
                 // Simulation is paused while the pointer is not captured so the
                 // "click to play / click to resume" prompt matches a frozen world.
                 if Input::should_simulate_gameplay(gameplay_active, self.window_focused)
@@ -1049,7 +1144,10 @@ impl ApplicationHandler for App {
                 {
                     self.notice = None;
                 }
-                let capture_prompt = !self.captured && !self.title_screen && !self.settings_menu;
+                let capture_prompt = !self.captured
+                    && !self.title_screen
+                    && !self.settings_menu
+                    && !self.result_screen;
                 let (prompt_title, prompt_subtitle) = if self.window_focused {
                     ("CLICK TO PLAY", "MOUSE LOOK REQUIRES POINTER LOCK")
                 } else {
@@ -1077,6 +1175,7 @@ impl ApplicationHandler for App {
                             )),
                             infinite_ammo: infinite_ammo_active,
                             hit_marker_strength: self.settings.hit_marker_strength,
+                            crosshair: self.settings.crosshair_style(),
                         },
                     );
                     if self.title_screen {
@@ -1085,6 +1184,9 @@ impl ApplicationHandler for App {
                             self.title_selection.selected_index(),
                             aspect,
                         );
+                    }
+                    if self.result_screen {
+                        crate::ui::result_overlay(&mut self.hud_mesh, aspect);
                     }
                     if capture_prompt {
                         crate::ui::capture_prompt_overlay(&mut self.hud_mesh, aspect);
@@ -1095,6 +1197,19 @@ impl ApplicationHandler for App {
                         crate::ui::title_text_into(
                             &mut self.text_mesh,
                             self.title_selection.selected_index(),
+                            [w, h],
+                        );
+                    } else if self.result_screen {
+                        crate::ui::result_text(
+                            &mut self.text_mesh,
+                            &crate::ui::ResultInfo {
+                                mode: self.session,
+                                kills: self.combat.kills,
+                                accuracy: self.combat.accuracy(),
+                                headshot_rate: self.combat.headshot_rate(),
+                                seconds: self.result_seconds,
+                                new_best: self.result_new_best,
+                            },
                             [w, h],
                         );
                     } else if self.settings_menu {
@@ -1116,6 +1231,8 @@ impl ApplicationHandler for App {
                                 ammo: self.weapons.active().ammo,
                                 magazine: self.weapons.active().data.magazine,
                                 kills: self.combat.kills,
+                                accuracy: self.combat.accuracy(),
+                                headshot_rate: self.combat.headshot_rate(),
                                 infinite_ammo: infinite_ammo_active,
                                 key_bindings: self.settings.key_bindings,
                             },
@@ -1235,6 +1352,11 @@ pub fn run() {
         settings,
         tracking_bot_count,
         session: SessionMode::FreeTraining,
+        records: Records::load(),
+        session_started: None,
+        result_screen: false,
+        result_new_best: false,
+        result_seconds: 0.0,
         title_screen: true,
         settings_menu: false,
         settings_from_title: false,
@@ -1246,6 +1368,8 @@ pub fn run() {
         title: String::new(),
         capture_requested: false,
         captured: false,
+        capture_attempt: false,
+        capture_deadline: None,
         window_focused: false,
         fixed: FixedStep::new(60, 5),
         next_frame_deadline: None,

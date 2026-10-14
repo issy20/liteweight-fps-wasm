@@ -1,11 +1,58 @@
+use crate::simulation::game_mode::SessionMode;
 use serde::{Deserialize, Serialize};
 
 const RENDER_SCALES: [f32; 4] = [0.5, 0.67, 0.75, 1.0];
 const FPS_LIMITS: [u16; 7] = [30, 60, 90, 120, 144, 240, 0];
+const MOUSE_DPI_MIN: u32 = 100;
+const MOUSE_DPI_MAX: u32 = 6400;
+const MOUSE_DPI_STEP: u32 = 100;
+/// Radians of view rotation per unit of raw mouse movement, before sensitivity.
+const RADIANS_PER_MOUSE_UNIT: f32 = 0.002;
 
-/// `localStorage` key used by the web build.
+/// Crosshair palette selectable in the settings menu.
+pub const CROSSHAIR_COLORS: [&str; 6] = ["WHITE", "GREEN", "CYAN", "YELLOW", "ORANGE", "RED"];
+const CROSSHAIR_RGB: [[f32; 3]; 6] = [
+    [1.0, 1.0, 1.0],
+    [0.35, 1.0, 0.45],
+    [0.35, 0.95, 1.0],
+    [1.0, 0.92, 0.35],
+    [1.0, 0.66, 0.24],
+    [1.0, 0.35, 0.32],
+];
+
+/// Resolved crosshair geometry and color used by the HUD renderer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CrosshairStyle {
+    pub color: [f32; 3],
+    pub gap: f32,
+    pub length: f32,
+    pub thickness: f32,
+    pub dot: bool,
+}
+
+impl Default for CrosshairStyle {
+    fn default() -> Self {
+        Self {
+            color: [1.0, 1.0, 1.0],
+            gap: 0.008,
+            length: 0.012,
+            thickness: 0.003,
+            dot: true,
+        }
+    }
+}
+
+/// Crosshair color for a palette index, clamped to the valid range.
+pub fn crosshair_color_rgb(index: u8) -> [f32; 3] {
+    CROSSHAIR_RGB[usize::from(index.min(CROSSHAIR_COLORS.len() as u8 - 1))]
+}
+
+/// `localStorage` key used by the web build for settings.
 #[cfg(target_arch = "wasm32")]
 const STORAGE_KEY: &str = "liteweight-fps/settings.json";
+/// `localStorage` key used by the web build for best records.
+#[cfg(target_arch = "wasm32")]
+const RECORDS_KEY: &str = "liteweight-fps/records.json";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -241,6 +288,18 @@ pub struct GameSettings {
     pub bot_hp: u32,
     pub bot_speed: f32,
     pub bot_respawn_seconds: f32,
+    /// Crosshair palette index (`0..=5`), see [`CROSSHAIR_COLORS`].
+    pub crosshair_color: u8,
+    /// Crosshair arm length multiplier.
+    pub crosshair_size: f32,
+    /// Crosshair center gap multiplier.
+    pub crosshair_gap: f32,
+    /// Crosshair stroke thickness multiplier.
+    pub crosshair_thickness: f32,
+    /// Whether the center dot is drawn.
+    pub crosshair_dot: bool,
+    /// Mouse DPI, used only for the cm/360 readout.
+    pub mouse_dpi: u32,
 }
 
 impl Default for GameSettings {
@@ -262,6 +321,12 @@ impl Default for GameSettings {
             bot_hp: 100,
             bot_speed: 1.0,
             bot_respawn_seconds: 2.0,
+            crosshair_color: 0,
+            crosshair_size: 1.0,
+            crosshair_gap: 1.0,
+            crosshair_thickness: 1.0,
+            crosshair_dot: true,
+            mouse_dpi: 800,
         }
     }
 }
@@ -290,11 +355,32 @@ impl GameSettings {
         }
     }
 
+    /// Resolves the crosshair geometry and color from the current settings.
+    pub fn crosshair_style(&self) -> CrosshairStyle {
+        CrosshairStyle {
+            color: crosshair_color_rgb(self.crosshair_color),
+            gap: 0.008 * self.crosshair_gap,
+            length: 0.012 * self.crosshair_size,
+            thickness: 0.003 * self.crosshair_thickness,
+            dot: self.crosshair_dot,
+        }
+    }
+
+    /// Hip-fire centimeters of mouse travel for a full 360-degree turn.
+    ///
+    /// `cm = (2π / (radians_per_unit * sensitivity)) / dpi * 2.54`.
+    pub fn cm_per_360(&self) -> f32 {
+        let sensitivity = self.mouse_sensitivity.max(f32::EPSILON);
+        let dpi = self.mouse_dpi.max(1) as f32;
+        (std::f32::consts::TAU * 2.54) / (RADIANS_PER_MOUSE_UNIT * sensitivity * dpi)
+    }
+
     pub fn toggle_setting(&mut self, setting: usize) {
         match setting {
             0 => self.infinite_ammo = !self.infinite_ammo,
             1 => self.fullscreen = !self.fullscreen,
             2 => self.invert_y = !self.invert_y,
+            3 => self.crosshair_dot = !self.crosshair_dot,
             _ => {}
         }
     }
@@ -343,6 +429,20 @@ impl GameSettings {
                 (i16::from(self.fps_limit_index) + direction.signum() as i16).rem_euclid(7) as u8;
         } else if setting == 11 {
             self.hit_marker_strength = (self.hit_marker_strength + direction * 0.1).clamp(0.0, 1.0);
+        } else if setting == 12 {
+            self.crosshair_size = (self.crosshair_size + direction * 0.1).clamp(0.5, 2.0);
+        } else if setting == 13 {
+            self.crosshair_gap = (self.crosshair_gap + direction * 0.1).clamp(0.0, 2.0);
+        } else if setting == 14 {
+            self.crosshair_thickness = (self.crosshair_thickness + direction * 0.1).clamp(0.5, 2.0);
+        } else if setting == 15 && direction != 0.0 {
+            self.crosshair_color = (i16::from(self.crosshair_color) + direction.signum() as i16)
+                .rem_euclid(CROSSHAIR_COLORS.len() as i16) as u8;
+        } else if setting == 16 && direction != 0.0 {
+            let delta = direction.signum() as i32 * MOUSE_DPI_STEP as i32;
+            self.mouse_dpi = (self.mouse_dpi as i32 + delta)
+                .clamp(MOUSE_DPI_MIN as i32, MOUSE_DPI_MAX as i32)
+                as u32;
         }
     }
 
@@ -362,6 +462,11 @@ impl GameSettings {
             || !(0.5..=10.0).contains(&settings.bot_respawn_seconds)
             || settings.render_scale_index > 3
             || settings.fps_limit_index > 6
+            || settings.crosshair_color as usize >= CROSSHAIR_COLORS.len()
+            || !(0.5..=2.0).contains(&settings.crosshair_size)
+            || !(0.0..=2.0).contains(&settings.crosshair_gap)
+            || !(0.5..=2.0).contains(&settings.crosshair_thickness)
+            || !(MOUSE_DPI_MIN..=MOUSE_DPI_MAX).contains(&settings.mouse_dpi)
             || !settings.key_bindings.are_unique()
         {
             return Self::default();
@@ -387,6 +492,72 @@ impl GameSettings {
         storage
             .set_item(STORAGE_KEY, &data)
             .map_err(|_| "設定の保存に失敗しました".to_owned())
+    }
+}
+
+/// Best result for a single training mode.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct ModeRecord {
+    pub kills: u32,
+    pub accuracy: f32,
+    pub headshot_rate: f32,
+}
+
+/// Persistent best results per mode.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct Records {
+    pub free_training: ModeRecord,
+    pub tracking_aim: ModeRecord,
+}
+
+impl Records {
+    pub fn get(&self, mode: SessionMode) -> ModeRecord {
+        match mode {
+            SessionMode::FreeTraining => self.free_training,
+            SessionMode::TrackingAim => self.tracking_aim,
+        }
+    }
+
+    fn get_mut(&mut self, mode: SessionMode) -> &mut ModeRecord {
+        match mode {
+            SessionMode::FreeTraining => &mut self.free_training,
+            SessionMode::TrackingAim => &mut self.tracking_aim,
+        }
+    }
+
+    /// Stores any improved metric and returns whether the record improved.
+    pub fn submit(&mut self, mode: SessionMode, result: ModeRecord) -> bool {
+        const EPSILON: f32 = 1e-4;
+        let record = self.get_mut(mode);
+        let improved = result.kills > record.kills
+            || result.accuracy > record.accuracy + EPSILON
+            || result.headshot_rate > record.headshot_rate + EPSILON;
+        record.kills = record.kills.max(result.kills);
+        record.accuracy = record.accuracy.max(result.accuracy);
+        record.headshot_rate = record.headshot_rate.max(result.headshot_rate);
+        improved
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load() -> Self {
+        let Some(json) =
+            web_storage().and_then(|storage| storage.get_item(RECORDS_KEY).ok().flatten())
+        else {
+            return Self::default();
+        };
+        serde_json::from_str(&json).unwrap_or_default()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn save(&self) -> Result<(), String> {
+        let storage =
+            web_storage().ok_or_else(|| "記録保存先(localStorage)を利用できません".to_owned())?;
+        let data = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        storage
+            .set_item(RECORDS_KEY, &data)
+            .map_err(|_| "記録の保存に失敗しました".to_owned())
     }
 }
 
@@ -486,20 +657,48 @@ mod native {
         }
 
         fn path() -> Option<PathBuf> {
-            #[cfg(target_os = "windows")]
-            let root = std::env::var_os("APPDATA").map(PathBuf::from)?;
-            #[cfg(target_os = "macos")]
-            let root = std::env::var_os("HOME")
-                .map(PathBuf::from)?
-                .join("Library/Application Support");
-            #[cfg(all(unix, not(target_os = "macos")))]
-            let root = std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
-                })?;
-            Some(root.join("liteweight-fps").join("settings.json"))
+            Some(config_root()?.join("liteweight-fps").join("settings.json"))
         }
+    }
+
+    impl super::Records {
+        pub fn load() -> Self {
+            let Some(path) = records_path() else {
+                return Self::default();
+            };
+            fs::read_to_string(path)
+                .ok()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default()
+        }
+
+        pub fn save(&self) -> Result<(), String> {
+            let path = records_path().ok_or_else(|| "記録保存先を特定できません".to_owned())?;
+            let parent = path
+                .parent()
+                .ok_or_else(|| "記録保存先が不正です".to_owned())?;
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            let data = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+            write_file_atomically(&path, &data).map_err(|e| e.to_string())
+        }
+    }
+
+    fn records_path() -> Option<PathBuf> {
+        Some(config_root()?.join("liteweight-fps").join("records.json"))
+    }
+
+    fn config_root() -> Option<PathBuf> {
+        #[cfg(target_os = "windows")]
+        let root = std::env::var_os("APPDATA").map(PathBuf::from)?;
+        #[cfg(target_os = "macos")]
+        let root = std::env::var_os("HOME")
+            .map(PathBuf::from)?
+            .join("Library/Application Support");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let root = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        Some(root)
     }
 
     #[cfg(test)]
@@ -545,7 +744,73 @@ mod native {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::GameSettings;
+    use super::{GameSettings, ModeRecord, Records};
+    use crate::simulation::game_mode::SessionMode;
+
+    #[test]
+    fn crosshair_defaults_use_the_reference_geometry() {
+        let settings = GameSettings::default();
+        let style = settings.crosshair_style();
+        assert_eq!(style.color, [1.0, 1.0, 1.0]);
+        assert!((style.gap - 0.008).abs() < 1e-6);
+        assert!((style.length - 0.012).abs() < 1e-6);
+        assert!((style.thickness - 0.003).abs() < 1e-6);
+        assert!(style.dot);
+    }
+
+    #[test]
+    fn cm_per_360_halves_when_sensitivity_doubles() {
+        let base = GameSettings {
+            mouse_sensitivity: 1.0,
+            mouse_dpi: 800,
+            ..GameSettings::default()
+        };
+        assert!((base.cm_per_360() - 9.974).abs() < 0.05);
+        let twice = GameSettings {
+            mouse_sensitivity: 2.0,
+            ..base
+        };
+        assert!((twice.cm_per_360() - base.cm_per_360() / 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn crosshair_and_dpi_adjustments_are_bounded() {
+        let mut settings = GameSettings::default();
+        settings.adjust_setting(12, 1.0);
+        assert!(settings.crosshair_size > 1.0);
+        settings.adjust_setting(16, -1.0);
+        assert_eq!(settings.mouse_dpi, 700);
+        settings.toggle_setting(3);
+        assert!(!settings.crosshair_dot);
+    }
+
+    #[test]
+    fn records_keep_the_best_per_mode_independently() {
+        let mut records = Records::default();
+        let good = ModeRecord {
+            kills: 5,
+            accuracy: 0.4,
+            headshot_rate: 0.2,
+        };
+        assert!(records.submit(SessionMode::FreeTraining, good));
+        let worse = ModeRecord {
+            kills: 3,
+            accuracy: 0.3,
+            headshot_rate: 0.1,
+        };
+        assert!(!records.submit(SessionMode::FreeTraining, worse));
+        assert_eq!(records.get(SessionMode::FreeTraining).kills, 5);
+        assert_eq!(records.get(SessionMode::TrackingAim), ModeRecord::default());
+        assert!(records.submit(
+            SessionMode::TrackingAim,
+            ModeRecord {
+                kills: 1,
+                accuracy: 0.9,
+                headshot_rate: 0.0,
+            },
+        ));
+        assert_eq!(records.get(SessionMode::TrackingAim).accuracy, 0.9);
+    }
 
     #[test]
     fn from_json_falls_back_to_defaults_on_invalid_values() {

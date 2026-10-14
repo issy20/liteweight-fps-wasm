@@ -472,7 +472,7 @@ pub fn settings_overlay(
         aspect,
     );
 
-    let visible = settings_visible_range(selected, 18);
+    let visible = settings_visible_range(selected, 24);
     for (row, setting_index) in visible.clone().enumerate() {
         let center = SETTINGS_ROW_TOP - row as f32 * SETTINGS_ROW_GAP - 0.02;
         let height = 0.070;
@@ -509,6 +509,10 @@ pub fn settings_overlay(
         (2, settings.ads_sensitivity),
         (10, settings.volume),
         (11, settings.hit_marker_strength),
+        (13, (settings.crosshair_size - 0.5) / 1.5),
+        (14, settings.crosshair_gap / 2.0),
+        (15, (settings.crosshair_thickness - 0.5) / 1.5),
+        (17, (settings.mouse_dpi.saturating_sub(100) as f32) / 6300.0),
     ] {
         let Some(row) = visible.clone().position(|index| index == setting_index) else {
             continue;
@@ -652,7 +656,11 @@ pub fn settings_text_with_bindings_into(
         ),
         (
             "MOUSE SENSITIVITY".to_owned(),
-            format!("{:.2}", settings.mouse_sensitivity),
+            format!(
+                "{:.2}  {:.1}CM/360",
+                settings.mouse_sensitivity,
+                settings.cm_per_360()
+            ),
         ),
         (
             "ADS SENSITIVITY".to_owned(),
@@ -694,6 +702,31 @@ pub fn settings_text_with_bindings_into(
         (
             "HIT MARKER STRENGTH".to_owned(),
             format!("{:.0}%", settings.hit_marker_strength * 100.0),
+        ),
+        (
+            "CROSSHAIR COLOR".to_owned(),
+            crate::persistence::CROSSHAIR_COLORS[usize::from(settings.crosshair_color.min(5))]
+                .to_owned(),
+        ),
+        (
+            "CROSSHAIR SIZE".to_owned(),
+            format!("{:.1}X", settings.crosshair_size),
+        ),
+        (
+            "CROSSHAIR GAP".to_owned(),
+            format!("{:.1}X", settings.crosshair_gap),
+        ),
+        (
+            "CROSSHAIR THICKNESS".to_owned(),
+            format!("{:.1}X", settings.crosshair_thickness),
+        ),
+        (
+            "CROSSHAIR DOT".to_owned(),
+            if settings.crosshair_dot { "ON" } else { "OFF" }.to_owned(),
+        ),
+        (
+            "MOUSE DPI".to_owned(),
+            format!("{} DPI", settings.mouse_dpi),
         ),
         ("BOT COUNT".to_owned(), settings.bot_count.to_string()),
         ("BOT BEHAVIOR".to_owned(), behavior.to_owned()),
@@ -987,6 +1020,8 @@ pub struct GameHudInfo {
     pub ammo: u32,
     pub magazine: u32,
     pub kills: u32,
+    pub accuracy: f32,
+    pub headshot_rate: f32,
     pub infinite_ammo: bool,
     pub key_bindings: crate::persistence::KeyBindings,
 }
@@ -1016,10 +1051,12 @@ pub fn game_hud_text_into(mesh: &mut TextMesh, info: GameHudInfo, viewport: [u32
     line(status, 0.97, 0.034, [0.98, 0.72, 0.39, 1.0]);
     line(
         &format!(
-            "{}   AMMO {}   KILLS {}",
+            "{}   AMMO {}   KILLS {}   ACC {:.0}%   HS {:.0}%",
             info.weapon.label(),
             ammo_text,
-            info.kills
+            info.kills,
+            info.accuracy.clamp(0.0, 1.0) * 100.0,
+            info.headshot_rate.clamp(0.0, 1.0) * 100.0,
         ),
         0.87,
         0.026,
@@ -1072,6 +1109,113 @@ pub fn append_notice_text(mesh: &mut TextMesh, message: &str, viewport: [u32; 2]
         font_px,
         viewport,
         [1.0, 0.46, 0.26, 1.0],
+    );
+}
+
+/// Session summary shown after leaving a run.
+pub struct ResultInfo {
+    pub mode: crate::simulation::game_mode::SessionMode,
+    pub kills: u32,
+    pub accuracy: f32,
+    pub headshot_rate: f32,
+    pub seconds: f32,
+    pub new_best: bool,
+}
+
+/// Dim backdrop and panel for the session result screen.
+pub fn result_overlay(mesh: &mut Scene, aspect: f32) {
+    modal_backdrop(mesh, aspect);
+    rect_alpha(
+        mesh,
+        -0.42 * aspect,
+        -0.36,
+        0.84 * aspect,
+        0.66,
+        [0.030, 0.040, 0.055, 0.97],
+        aspect,
+    );
+    rect(
+        mesh,
+        -0.42 * aspect,
+        -0.36,
+        0.006 * aspect,
+        0.66,
+        [0.95, 0.53, 0.19],
+        aspect,
+    );
+}
+
+/// Text for [`result_overlay`].
+pub fn result_text(mesh: &mut TextMesh, info: &ResultInfo, viewport: [u32; 2]) {
+    mesh.clear();
+    let font = FontAtlas::shared();
+    let mode = match info.mode {
+        crate::simulation::game_mode::SessionMode::FreeTraining => "FREE TRAINING",
+        crate::simulation::game_mode::SessionMode::TrackingAim => "TRACKING AIM",
+    };
+    let minutes = (info.seconds.max(0.0) / 60.0).floor() as u32;
+    let seconds = info.seconds.max(0.0) - minutes as f32 * 60.0;
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        "SESSION RESULT",
+        0.25,
+        0.026,
+        viewport,
+        [0.59, 0.68, 0.71, 1.0],
+    );
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        mode,
+        0.17,
+        0.042,
+        viewport,
+        [0.98, 0.72, 0.39, 1.0],
+    );
+    let rows = [
+        ("KILLS", format!("{}", info.kills)),
+        (
+            "ACCURACY",
+            format!("{:.0}%", info.accuracy.clamp(0.0, 1.0) * 100.0),
+        ),
+        (
+            "HEADSHOTS",
+            format!("{:.0}%", info.headshot_rate.clamp(0.0, 1.0) * 100.0),
+        ),
+        ("TIME", format!("{minutes}:{seconds:04.1}")),
+    ];
+    for (index, (label, value)) in rows.into_iter().enumerate() {
+        let y = 0.06 - index as f32 * 0.070;
+        append_vertically_centered_text_line(
+            mesh,
+            font,
+            &format!("{label}   {value}"),
+            y,
+            0.028,
+            viewport,
+            [0.85, 0.89, 0.90, 1.0],
+        );
+    }
+    if info.new_best {
+        append_vertically_centered_text_line(
+            mesh,
+            font,
+            "NEW BEST",
+            -0.235,
+            0.032,
+            viewport,
+            [1.0, 0.65, 0.24, 1.0],
+        );
+    }
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        "PRESS ENTER FOR TITLE",
+        -0.31,
+        0.020,
+        viewport,
+        [0.67, 0.75, 0.77, 1.0],
     );
 }
 
@@ -1520,6 +1664,7 @@ pub struct HudOptions<'a> {
     pub menu: Option<(&'a crate::persistence::GameSettings, usize)>,
     pub infinite_ammo: bool,
     pub hit_marker_strength: f32,
+    pub crosshair: crate::persistence::CrosshairStyle,
 }
 
 pub fn hud_mesh_with_hit_marker_strength(
@@ -1543,6 +1688,7 @@ pub fn hud_mesh_with_hit_marker_strength(
             menu: None,
             infinite_ammo: false,
             hit_marker_strength,
+            crosshair: crate::persistence::CrosshairStyle::default(),
         },
     );
     mesh
@@ -1567,6 +1713,7 @@ pub fn hud_mesh_with_menu_and_ammo_into(
             menu,
             infinite_ammo,
             hit_marker_strength: 1.0,
+            crosshair: crate::persistence::CrosshairStyle::default(),
         },
     );
 }
@@ -1583,6 +1730,7 @@ pub fn hud_mesh_with_menu_and_ammo_and_hit_marker_strength_into(
         menu,
         infinite_ammo,
         hit_marker_strength,
+        crosshair,
     } = options;
     m.vertices.clear();
     m.indices.clear();
@@ -1742,28 +1890,41 @@ pub fn hud_mesh_with_menu_and_ammo_and_hit_marker_strength_into(
         );
     }
     if weapon.ads_progress <= f32::EPSILON {
-        let gap = 0.008;
-        for sign in [-1., 1.] {
+        let half = crosshair.thickness * 0.5;
+        for sign in [-1.0_f32, 1.0] {
+            let x = if sign > 0.0 {
+                crosshair.gap
+            } else {
+                -crosshair.gap - crosshair.length
+            };
             rect(
                 m,
-                sign * gap - 0.006,
-                -0.0015,
-                0.012,
-                0.003,
-                [0.9; 3],
+                x,
+                -half,
+                crosshair.length,
+                crosshair.thickness,
+                crosshair.color,
                 aspect,
             );
+            let y = if sign > 0.0 {
+                crosshair.gap
+            } else {
+                -crosshair.gap - crosshair.length
+            };
             rect(
                 m,
-                -0.0015,
-                sign * gap - 0.006,
-                0.003,
-                0.012,
-                [0.9; 3],
+                -half,
+                y,
+                crosshair.thickness,
+                crosshair.length,
+                crosshair.color,
                 aspect,
             );
         }
-        rect(m, -0.002, -0.002, 0.004, 0.004, [1.; 3], aspect);
+        if crosshair.dot {
+            let dot = crosshair.thickness * 1.4;
+            rect(m, -dot * 0.5, -dot * 0.5, dot, dot, crosshair.color, aspect);
+        }
     }
     let hit_marker_strength = if hit_marker_strength.is_finite() {
         hit_marker_strength.clamp(0.0, 1.0)
@@ -1832,24 +1993,26 @@ pub fn hud_mesh_with_menu_and_ammo_and_hit_marker_strength_into(
 mod tests {
     use super::{
         append_notice_text, append_vertically_centered_text_line, capture_prompt_overlay,
-        capture_prompt_text, scope_shadow, settings_overlay, settings_text_with_bindings,
-        settings_visible_range, ScopeVisualState, SCOPE_MAX_RADIUS, SETTINGS_VISIBLE_ROWS,
+        capture_prompt_text, result_overlay, result_text, scope_shadow, settings_overlay,
+        settings_text_with_bindings, settings_visible_range, ResultInfo, ScopeVisualState,
+        SCOPE_MAX_RADIUS, SETTINGS_VISIBLE_ROWS,
     };
     use crate::engine::text::TextMesh;
+    use crate::simulation::game_mode::SessionMode;
     use crate::simulation::weapon::{Weapon, WeaponKind, SNIPER};
 
     #[test]
     fn settings_scroll_window_keeps_selection_visible_at_each_end() {
         assert_eq!(SETTINGS_VISIBLE_ROWS, 11);
-        assert_eq!(settings_visible_range(0, 18), 0..11);
-        assert_eq!(settings_visible_range(10, 18), 5..16);
-        assert_eq!(settings_visible_range(17, 18), 7..18);
+        assert_eq!(settings_visible_range(0, 24), 0..11);
+        assert_eq!(settings_visible_range(10, 24), 5..16);
+        assert_eq!(settings_visible_range(23, 24), 13..24);
     }
 
     #[test]
     fn change_mode_row_remains_visible_and_highlighted() {
         let settings = crate::persistence::GameSettings::default();
-        let change_mode = settings_text_with_bindings(&settings, 17, [1280, 720], false, 0, false);
+        let change_mode = settings_text_with_bindings(&settings, 23, [1280, 720], false, 0, false);
         assert!(change_mode
             .vertices
             .iter()
@@ -2192,7 +2355,7 @@ mod tests {
     fn resume_and_change_mode_highlights_cover_the_full_text_height() {
         for (selected, expected_min_y, expected_max_y, color) in [
             (0, 0.44, 0.50, [0.92, 0.48, 0.16, 0.22]),
-            (17, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
+            (23, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
         ] {
             let mut mesh = crate::Scene {
                 vertices: Vec::new(),
@@ -2275,6 +2438,32 @@ mod tests {
             [1280, 720],
         );
         assert!(!text.vertices.is_empty());
+    }
+
+    #[test]
+    fn result_screen_draws_a_panel_and_summary_text() {
+        let mut mesh = crate::Scene {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        };
+        result_overlay(&mut mesh, 16.0 / 9.0);
+        assert!(!mesh.indices.is_empty());
+
+        let info = ResultInfo {
+            mode: SessionMode::FreeTraining,
+            kills: 3,
+            accuracy: 0.5,
+            headshot_rate: 0.25,
+            seconds: 61.0,
+            new_best: true,
+        };
+        let mut text = TextMesh::default();
+        result_text(&mut text, &info, [1280, 720]);
+        let first = text.vertices.len();
+        assert!(first > 0);
+        // Reusing the buffer must replace, not append to, the previous text.
+        result_text(&mut text, &info, [1280, 720]);
+        assert_eq!(text.vertices.len(), first);
     }
 
     #[test]

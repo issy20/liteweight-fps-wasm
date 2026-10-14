@@ -196,6 +196,9 @@ pub struct Combat {
     pub last_shot: Shot,
     pub feedback: f32,
     pub kills: u32,
+    pub shots_fired: u32,
+    pub hits: u32,
+    pub headshots: u32,
     pub spawn_cursor: usize,
     pub arena_scale: f32,
     respawn_rng: u32,
@@ -222,6 +225,9 @@ impl Combat {
             last_shot: Shot::default(),
             feedback: 0.0,
             kills: 0,
+            shots_fired: 0,
+            hits: 0,
+            headshots: 0,
             spawn_cursor: 0,
             arena_scale: 1.0,
             respawn_rng: initial_respawn_seed(),
@@ -232,6 +238,24 @@ impl Combat {
     /// Fixes the Free Training respawn sequence for deterministic tests.
     pub fn set_respawn_seed(&mut self, seed: u32) {
         self.respawn_rng = seed.max(1);
+    }
+
+    /// Fraction of fired shots that damaged a target, in `0.0..=1.0`.
+    pub fn accuracy(&self) -> f32 {
+        if self.shots_fired == 0 {
+            0.0
+        } else {
+            self.hits as f32 / self.shots_fired as f32
+        }
+    }
+
+    /// Fraction of damaging hits that were headshots, in `0.0..=1.0`.
+    pub fn headshot_rate(&self) -> f32 {
+        if self.hits == 0 {
+            0.0
+        } else {
+            self.headshots as f32 / self.hits as f32
+        }
     }
 
     pub fn configure_bots(&mut self, count: u32, behavior_setting: u8) {
@@ -485,6 +509,7 @@ impl Combat {
     }
 
     pub fn shoot(&mut self, origin: Vec3, direction: Vec3, walls: &[Aabb], damage: u32) -> Shot {
+        self.shots_fired = self.shots_fired.saturating_add(1);
         let direction = direction.normalize_or_zero();
         let mut distance = 100.0;
         let mut impact = false;
@@ -522,6 +547,10 @@ impl Combat {
             shot.headshot = head;
             shot.killed = bot.apply_damage(damage * if head { 2 } else { 1 });
             self.kills += u32::from(shot.killed);
+            self.hits = self.hits.saturating_add(1);
+            if head {
+                self.headshots = self.headshots.saturating_add(1);
+            }
         }
         self.last_shot = shot;
         self.feedback = 0.12;
@@ -557,6 +586,7 @@ impl Combat {
         walls: &[Aabb],
         damage: u32,
     ) -> Shot {
+        self.shots_fired = self.shots_fired.saturating_add(1);
         let aim_direction = aim_direction.normalize_or_zero();
         let shot_direction = shot_direction.normalize_or_zero();
         let mut aim_distance: f32 = 100.0;
@@ -685,6 +715,10 @@ impl Combat {
             shot.headshot = headshot;
             shot.killed = self.targets[index].apply_damage(damage * if headshot { 2 } else { 1 });
             self.kills += u32::from(shot.killed);
+            self.hits = self.hits.saturating_add(1);
+            if headshot {
+                self.headshots = self.headshots.saturating_add(1);
+            }
         }
         shot
     }
@@ -693,6 +727,30 @@ impl Combat {
 #[cfg(test)]
 mod respawn_selection_tests {
     use super::*;
+
+    #[test]
+    fn shooting_records_shots_hits_and_accuracy() {
+        let mut combat = Combat::new(vec![Bot::new(Vec3::new(0.0, 0.0, -3.0))]);
+        let eye = Vec3::new(0.0, 1.6, 0.0);
+        combat.shoot(eye, Vec3::new(0.0, 0.0, -1.0), &[], 25);
+        assert_eq!((combat.shots_fired, combat.hits), (1, 1));
+        combat.shoot(eye, Vec3::new(0.0, 1.0, 0.0), &[], 25);
+        assert_eq!((combat.shots_fired, combat.hits), (2, 1));
+        assert!((combat.accuracy() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn headshots_are_counted_and_rated() {
+        let mut combat = Combat::new(vec![Bot::new(Vec3::new(0.0, 0.0, -3.0))]);
+        combat.shoot(
+            Vec3::new(0.0, 1.9, 0.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            &[],
+            100,
+        );
+        assert_eq!((combat.hits, combat.headshots), (1, 1));
+        assert!((combat.headshot_rate() - 1.0).abs() < 1e-6);
+    }
 
     #[test]
     fn only_obscured_valid_candidates_are_selected_when_available() {
