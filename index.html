@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>liteweight-fps</title>
+    <meta name="theme-color" content="#0a0d12" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="sw.js" />
+    <link data-trunk rel="copy-file" href="icon-192.png" />
+    <link data-trunk rel="copy-file" href="icon-512.png" />
+    <link data-trunk rel="copy-file" href="credits.html" />
+    <link data-trunk rel="copy-file" href="LICENSE-MIT" />
+    <link data-trunk rel="copy-file" href="LICENSE-APACHE" />
+    <link data-trunk rel="copy-file" href="assets/fonts/OFL.txt" />
     <style>
       html,
       body {
@@ -104,5 +115,12 @@
       data-wasm-opt="z"
       data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int"
     />
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("sw.js").catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
