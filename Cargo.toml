@@ -2,6 +2,7 @@
 name = "liteweight-fps-wasm"
 version = "0.1.0"
 edition = "2021"
+authors = ["issy20"]
 license = "MIT OR Apache-2.0"
 
 [lib]

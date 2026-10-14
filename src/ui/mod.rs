@@ -798,18 +798,18 @@ pub fn title_overlay(mesh: &mut Scene, selected: usize, aspect: f32) {
     rect_alpha(
         mesh,
         -0.53 * aspect,
-        -0.78,
+        -0.88,
         1.06 * aspect,
-        1.62,
+        1.72,
         [0.025, 0.036, 0.047, 0.98],
         aspect,
     );
     rect(
         mesh,
         -0.53 * aspect,
-        -0.78,
+        -0.88,
         0.008 * aspect,
-        1.62,
+        1.72,
         [0.95, 0.53, 0.19],
         aspect,
     );
@@ -964,10 +964,19 @@ pub fn title_text_into(mesh: &mut TextMesh, selected: usize, viewport: [u32; 2])
         mesh,
         font,
         &format!("v{}", crate::VERSION),
-        -0.74,
+        -0.745,
         0.020,
         viewport,
         [0.45, 0.52, 0.56, 1.0],
+    );
+    append_centered_text_line(
+        mesh,
+        font,
+        "(C) 2026 ISSY20   FONT: CANTARELL (OFL)",
+        -0.815,
+        0.017,
+        viewport,
+        [0.42, 0.48, 0.52, 1.0],
     );
 }
 
@@ -1055,13 +1064,14 @@ pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
     );
     let rows = [
         ("GAME", "LITEWEIGHT-FPS  MIT OR APACHE-2.0"),
+        ("ORIGIN", "PORT OF LITEWEIGHT-FPS BY ISSY20"),
         ("FONT", "CANTARELL  SIL OPEN FONT LICENSE"),
         ("ENGINE", "WGPU / WINIT / GLAM / AB_GLYPH / SERDE"),
         ("PRIVACY", "SETTINGS & RECORDS STORED LOCALLY. NO TRACKING."),
         ("LICENSES", "LICENSE-MIT / LICENSE-APACHE / OFL.TXT"),
     ];
     for (index, (label, value)) in rows.into_iter().enumerate() {
-        let y = 0.11 - index as f32 * 0.082;
+        let y = 0.11 - index as f32 * 0.074;
         append_vertically_centered_text_line(
             mesh,
             font,

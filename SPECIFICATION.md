@@ -519,10 +519,12 @@ HS=ヘッドショット率）。下端に移動・射撃・リロード・武�
 - タイトルの `CREDITS` から開く（`credits_screen`、タイトル／リザルトと排他）。
 - `credits_overlay(mesh, aspect)`: 減光＋中央パネル（`x=-0.52..0.52`、`y=-0.38..0.30`）。
 - `credits_text(mesh, viewport)`: 先頭で `mesh.clear()`。`CREDITS`、`GAME`（MIT OR
-  Apache-2.0）、`FONT`（Cantarell / SIL Open Font License）、`ENGINE`
-  （wgpu/winit/glam/ab_glyph/serde）、`PRIVACY`（localStorage のみ・トラッキングなし）、
-  `LICENSES`（同梱ファイル名）、操作ヒント、バージョン。
+  Apache-2.0）、`ORIGIN`（liteweight-fps のポート、issy20）、`FONT`
+  （Cantarell / SIL Open Font License）、`ENGINE`（wgpu/winit/glam/ab_glyph/serde）、
+  `PRIVACY`（localStorage のみ・トラッキングなし）、`LICENSES`（同梱ファイル名）、
+  操作ヒント、バージョン。
 - Esc でタイトルへ戻る。Enter で同梱の `credits.html` を別タブで開く（全文ライセンス閲覧用）。
+  `credits.html` には原作者（issy20 / liteweight-fps）の ORIGINAL PROJECT 節を含む。
 
 ---
 
