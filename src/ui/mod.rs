@@ -798,24 +798,29 @@ pub fn title_overlay(mesh: &mut Scene, selected: usize, aspect: f32) {
     rect_alpha(
         mesh,
         -0.53 * aspect,
-        -0.56,
+        -0.78,
         1.06 * aspect,
-        1.40,
+        1.62,
         [0.025, 0.036, 0.047, 0.98],
         aspect,
     );
     rect(
         mesh,
         -0.53 * aspect,
-        -0.56,
+        -0.78,
         0.008 * aspect,
-        1.40,
+        1.62,
         [0.95, 0.53, 0.19],
         aspect,
     );
-    for (index, (bottom, height)) in [(0.085, 0.19), (-0.135, 0.19), (-0.355, 0.19)]
-        .into_iter()
-        .enumerate()
+    for (index, (bottom, height)) in [
+        (0.085, 0.19),
+        (-0.135, 0.19),
+        (-0.355, 0.19),
+        (-0.575, 0.19),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let is_selected = index == selected;
         rect_alpha(
@@ -934,6 +939,7 @@ pub fn title_text_into(mesh: &mut TextMesh, selected: usize, viewport: [u32; 2])
         ("FREE TRAINING", 0.18_f32),
         ("TRACKING AIM", -0.04),
         ("SETTINGS", -0.26),
+        ("CREDITS", -0.48),
     ]
     .into_iter()
     .enumerate()
@@ -1008,6 +1014,81 @@ pub fn capture_prompt_text(mesh: &mut TextMesh, title: &str, subtitle: &str, vie
         0.022,
         viewport,
         [0.75, 0.81, 0.83, 1.0],
+    );
+}
+
+/// Dim backdrop and panel for the credits screen.
+pub fn credits_overlay(mesh: &mut Scene, aspect: f32) {
+    modal_backdrop(mesh, aspect);
+    rect_alpha(
+        mesh,
+        -0.52 * aspect,
+        -0.38,
+        1.04 * aspect,
+        0.68,
+        [0.030, 0.040, 0.055, 0.97],
+        aspect,
+    );
+    rect(
+        mesh,
+        -0.52 * aspect,
+        -0.38,
+        0.006 * aspect,
+        0.68,
+        [0.95, 0.53, 0.19],
+        aspect,
+    );
+}
+
+/// Text for the credits screen.
+pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
+    mesh.clear();
+    let font = FontAtlas::shared();
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        "CREDITS",
+        0.22,
+        0.038,
+        viewport,
+        [0.98, 0.72, 0.39, 1.0],
+    );
+    let rows = [
+        ("GAME", "LITEWEIGHT-FPS  MIT OR APACHE-2.0"),
+        ("FONT", "CANTARELL  SIL OPEN FONT LICENSE"),
+        ("ENGINE", "WGPU / WINIT / GLAM / AB_GLYPH / SERDE"),
+        ("PRIVACY", "SETTINGS & RECORDS STORED LOCALLY. NO TRACKING."),
+        ("LICENSES", "LICENSE-MIT / LICENSE-APACHE / OFL.TXT"),
+    ];
+    for (index, (label, value)) in rows.into_iter().enumerate() {
+        let y = 0.11 - index as f32 * 0.078;
+        append_vertically_centered_text_line(
+            mesh,
+            font,
+            &format!("{label}   {value}"),
+            y,
+            0.020,
+            viewport,
+            [0.85, 0.89, 0.90, 1.0],
+        );
+    }
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        "ESC CLOSE      ENTER OPEN CREDITS PAGE",
+        -0.30,
+        0.020,
+        viewport,
+        [0.67, 0.75, 0.77, 1.0],
+    );
+    append_vertically_centered_text_line(
+        mesh,
+        font,
+        &format!("v{}", crate::VERSION),
+        -0.345,
+        0.017,
+        viewport,
+        [0.45, 0.52, 0.56, 1.0],
     );
 }
 
@@ -2002,9 +2083,9 @@ pub fn hud_mesh_with_menu_and_ammo_and_hit_marker_strength_into(
 mod tests {
     use super::{
         append_notice_text, append_vertically_centered_text_line, capture_prompt_overlay,
-        capture_prompt_text, result_overlay, result_text, scope_shadow, settings_overlay,
-        settings_text_with_bindings, settings_visible_range, ResultInfo, ScopeVisualState,
-        SCOPE_MAX_RADIUS, SETTINGS_VISIBLE_ROWS,
+        capture_prompt_text, credits_overlay, credits_text, result_overlay, result_text,
+        scope_shadow, settings_overlay, settings_text_with_bindings, settings_visible_range,
+        ResultInfo, ScopeVisualState, SCOPE_MAX_RADIUS, SETTINGS_VISIBLE_ROWS,
     };
     use crate::engine::text::TextMesh;
     use crate::simulation::game_mode::SessionMode;
@@ -2403,7 +2484,9 @@ mod tests {
 
     #[test]
     fn title_menu_highlights_cover_each_larger_menu_label() {
-        for (selected, text_top, text_height) in [(0, 0.18, 0.047), (2, -0.26, 0.047)] {
+        for (selected, text_top, text_height) in
+            [(0, 0.18, 0.047), (2, -0.26, 0.047), (3, -0.48, 0.047)]
+        {
             let mut mesh = crate::Scene {
                 vertices: Vec::new(),
                 indices: Vec::new(),
@@ -2447,6 +2530,19 @@ mod tests {
             "MOUSE LOOK USES POINTER LOCK",
             [1280, 720],
         );
+        assert!(!text.vertices.is_empty());
+    }
+
+    #[test]
+    fn credits_screen_draws_a_panel_and_text() {
+        let mut mesh = crate::Scene {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        };
+        credits_overlay(&mut mesh, 16.0 / 9.0);
+        assert!(!mesh.indices.is_empty());
+        let mut text = TextMesh::default();
+        credits_text(&mut text, [1280, 720]);
         assert!(!text.vertices.is_empty());
     }
 

@@ -105,6 +105,12 @@ fn set_loading_error(message: &str) {
     set_loading(true);
 }
 
+fn open_credits_page() {
+    if let Some(window) = web_sys::window() {
+        let _ = window.open_with_url_and_target_and_features("credits.html", "_blank", "");
+    }
+}
+
 fn console_log(message: &str) {
     web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(message));
 }
@@ -494,6 +500,15 @@ impl App {
         self.capture_requested = false;
         self.release_capture();
     }
+    fn open_credits(&mut self) {
+        self.credits_screen = true;
+        self.title_screen = false;
+    }
+    fn close_credits(&mut self) {
+        self.credits_screen = false;
+        self.title_screen = true;
+        self.title_selection = TitleSelection::default();
+    }
     fn begin_session(&mut self, mode: SessionMode) {
         self.player = Player::new();
         self.weapons = Loadout::default();
@@ -851,6 +866,14 @@ impl ApplicationHandler for App {
                             self.finish_result();
                         }
                     }
+                } else if self.credits_screen {
+                    if pressed && !event.repeat {
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::Enter) => open_credits_page(),
+                            PhysicalKey::Code(KeyCode::Escape) => self.close_credits(),
+                            _ => {}
+                        }
+                    }
                 } else {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowUp)
@@ -880,6 +903,7 @@ impl ApplicationHandler for App {
                                     self.pause_selection = PauseSelection::default();
                                     self.capture_requested = false;
                                 }
+                                TitleMenuAction::Credits => self.open_credits(),
                             }
                         }
                         PhysicalKey::Code(code)
@@ -1089,8 +1113,10 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let dt = now.duration_since(self.clock).as_secs_f64();
                 self.clock = now;
-                let gameplay_active =
-                    !self.title_screen && !self.settings_menu && !self.result_screen;
+                let gameplay_active = !self.title_screen
+                    && !self.settings_menu
+                    && !self.result_screen
+                    && !self.credits_screen;
                 // Simulation is paused while the pointer is not captured so the
                 // "click to play / click to resume" prompt matches a frozen world.
                 if Input::should_simulate_gameplay(gameplay_active, self.window_focused)
@@ -1178,7 +1204,8 @@ impl ApplicationHandler for App {
                 let capture_prompt = !self.captured
                     && !self.title_screen
                     && !self.settings_menu
-                    && !self.result_screen;
+                    && !self.result_screen
+                    && !self.credits_screen;
                 let (prompt_title, prompt_subtitle) = if self.window_focused {
                     ("CLICK TO PLAY", "MOUSE LOOK REQUIRES POINTER LOCK")
                 } else {
@@ -1219,6 +1246,9 @@ impl ApplicationHandler for App {
                     if self.result_screen {
                         crate::ui::result_overlay(&mut self.hud_mesh, aspect);
                     }
+                    if self.credits_screen {
+                        crate::ui::credits_overlay(&mut self.hud_mesh, aspect);
+                    }
                     if capture_prompt {
                         crate::ui::capture_prompt_overlay(&mut self.hud_mesh, aspect);
                     }
@@ -1230,6 +1260,8 @@ impl ApplicationHandler for App {
                             self.title_selection.selected_index(),
                             [w, h],
                         );
+                    } else if self.credits_screen {
+                        crate::ui::credits_text(&mut self.text_mesh, [w, h]);
                     } else if self.result_screen {
                         crate::ui::result_text(
                             &mut self.text_mesh,

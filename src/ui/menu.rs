@@ -11,6 +11,7 @@ pub enum TitleMenuAction {
     FreeTraining,
     TrackingAim,
     Settings,
+    Credits,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -19,7 +20,7 @@ pub struct TitleSelection {
 }
 
 impl TitleSelection {
-    const ITEM_COUNT: usize = 3;
+    const ITEM_COUNT: usize = 4;
 
     pub fn selected_index(self) -> usize {
         self.selected
@@ -37,7 +38,8 @@ impl TitleSelection {
         match self.selected {
             0 => TitleMenuAction::FreeTraining,
             1 => TitleMenuAction::TrackingAim,
-            _ => TitleMenuAction::Settings,
+            2 => TitleMenuAction::Settings,
+            _ => TitleMenuAction::Credits,
         }
     }
 }
