@@ -624,7 +624,7 @@ pub fn settings_text_with_bindings_into(
         if from_title { "SETTINGS" } else { "PAUSED" },
         -0.08,
         0.80,
-        0.060,
+        0.064,
         [0.98, 0.72, 0.39, 1.0],
     );
     let _ = line(
@@ -635,7 +635,7 @@ pub fn settings_text_with_bindings_into(
         },
         -0.23,
         0.69,
-        0.021,
+        0.026,
         [0.59, 0.68, 0.71, 1.0],
     );
 
@@ -757,13 +757,13 @@ pub fn settings_text_with_bindings_into(
         let (label, value) = &rows[index];
         let y = SETTINGS_ROW_TOP - row as f32 * SETTINGS_ROW_GAP;
         let color = if selected == index { active } else { normal };
-        let _ = line(label, -0.55, y, 0.019, color);
+        let _ = line(label, -0.55, y, 0.024, color);
         if !value.is_empty() {
             let _ = line(
                 value,
                 0.30,
                 y,
-                0.019,
+                0.024,
                 if waiting_for_binding && index == 5 {
                     warning
                 } else {
@@ -776,7 +776,7 @@ pub fn settings_text_with_bindings_into(
         "UP/DOWN SELECT   LEFT/RIGHT ADJUST   ENTER REBIND   HOME DEFAULTS",
         -0.55,
         -0.86,
-        0.014,
+        0.018,
         normal,
     );
     let _ = line(
@@ -788,7 +788,7 @@ pub fn settings_text_with_bindings_into(
         ),
         0.37,
         0.69,
-        0.016,
+        0.018,
         normal,
     );
 }
@@ -1049,7 +1049,7 @@ pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
         font,
         "CREDITS",
         0.22,
-        0.038,
+        0.048,
         viewport,
         [0.98, 0.72, 0.39, 1.0],
     );
@@ -1061,13 +1061,13 @@ pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
         ("LICENSES", "LICENSE-MIT / LICENSE-APACHE / OFL.TXT"),
     ];
     for (index, (label, value)) in rows.into_iter().enumerate() {
-        let y = 0.11 - index as f32 * 0.078;
+        let y = 0.11 - index as f32 * 0.082;
         append_vertically_centered_text_line(
             mesh,
             font,
             &format!("{label}   {value}"),
             y,
-            0.020,
+            0.026,
             viewport,
             [0.85, 0.89, 0.90, 1.0],
         );
@@ -1076,8 +1076,8 @@ pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
         mesh,
         font,
         "ESC CLOSE      ENTER OPEN CREDITS PAGE",
-        -0.30,
-        0.020,
+        -0.31,
+        0.024,
         viewport,
         [0.67, 0.75, 0.77, 1.0],
     );
@@ -1085,8 +1085,8 @@ pub fn credits_text(mesh: &mut TextMesh, viewport: [u32; 2]) {
         mesh,
         font,
         &format!("v{}", crate::VERSION),
-        -0.345,
-        0.017,
+        -0.352,
+        0.020,
         viewport,
         [0.45, 0.52, 0.56, 1.0],
     );
