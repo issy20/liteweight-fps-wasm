@@ -18,6 +18,9 @@ pub mod world;
 
 pub use world::{Scene, Vertex};
 
+/// Application version, shown on the title screen and used for update notices.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[cfg(target_arch = "wasm32")]
 pub mod app;
 

@@ -472,7 +472,7 @@ pub fn settings_overlay(
         aspect,
     );
 
-    let visible = settings_visible_range(selected, 23);
+    let visible = settings_visible_range(selected, 24);
     for (row, setting_index) in visible.clone().enumerate() {
         let center = SETTINGS_ROW_TOP - row as f32 * SETTINGS_ROW_GAP - 0.02;
         let height = 0.070;
@@ -560,9 +560,10 @@ pub fn settings_text_for_context(
     viewport: [u32; 2],
     from_title: bool,
 ) -> TextMesh {
-    settings_text_with_bindings(settings, selected, viewport, from_title, 0, false)
+    settings_text_with_bindings(settings, selected, viewport, from_title, 0, false, 0)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn settings_text_with_bindings(
     settings: &crate::persistence::GameSettings,
     selected: usize,
@@ -570,6 +571,7 @@ pub fn settings_text_with_bindings(
     from_title: bool,
     binding_selection: usize,
     waiting_for_binding: bool,
+    profile: u8,
 ) -> TextMesh {
     let mut mesh = TextMesh::default();
     settings_text_with_bindings_into(
@@ -580,10 +582,12 @@ pub fn settings_text_with_bindings(
         from_title,
         binding_selection,
         waiting_for_binding,
+        profile,
     );
     mesh
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn settings_text_with_bindings_into(
     mesh: &mut TextMesh,
     settings: &crate::persistence::GameSettings,
@@ -592,6 +596,7 @@ pub fn settings_text_with_bindings_into(
     from_title: bool,
     binding_selection: usize,
     waiting_for_binding: bool,
+    profile: u8,
 ) {
     use crate::persistence::BindingAction;
 
@@ -729,6 +734,10 @@ pub fn settings_text_with_bindings_into(
         (
             "BOT RESPAWN".to_owned(),
             format!("{:.2}S", settings.bot_respawn_seconds),
+        ),
+        (
+            "PROFILE".to_owned(),
+            format!("{}/{}", profile + 1, crate::persistence::PROFILE_COUNT),
         ),
         (
             if from_title {
@@ -940,10 +949,19 @@ pub fn title_text_into(mesh: &mut TextMesh, selected: usize, viewport: [u32; 2])
         mesh,
         font,
         "UP / DOWN MOVE      ENTER SELECT",
-        -0.68,
+        -0.66,
         0.027,
         viewport,
         [0.67, 0.75, 0.77, 1.0],
+    );
+    append_centered_text_line(
+        mesh,
+        font,
+        &format!("v{}", crate::VERSION),
+        -0.74,
+        0.020,
+        viewport,
+        [0.45, 0.52, 0.56, 1.0],
     );
 }
 
@@ -1995,15 +2013,16 @@ mod tests {
     #[test]
     fn settings_scroll_window_keeps_selection_visible_at_each_end() {
         assert_eq!(SETTINGS_VISIBLE_ROWS, 11);
-        assert_eq!(settings_visible_range(0, 23), 0..11);
-        assert_eq!(settings_visible_range(10, 23), 5..16);
-        assert_eq!(settings_visible_range(22, 23), 12..23);
+        assert_eq!(settings_visible_range(0, 24), 0..11);
+        assert_eq!(settings_visible_range(10, 24), 5..16);
+        assert_eq!(settings_visible_range(23, 24), 13..24);
     }
 
     #[test]
     fn change_mode_row_remains_visible_and_highlighted() {
         let settings = crate::persistence::GameSettings::default();
-        let change_mode = settings_text_with_bindings(&settings, 22, [1280, 720], false, 0, false);
+        let change_mode =
+            settings_text_with_bindings(&settings, 23, [1280, 720], false, 0, false, 0);
         assert!(change_mode
             .vertices
             .iter()
@@ -2013,7 +2032,7 @@ mod tests {
     #[test]
     fn selected_background_covers_the_rendered_text_with_balanced_padding() {
         let settings = crate::persistence::GameSettings::default();
-        let text = settings_text_with_bindings(&settings, 1, [1280, 720], false, 0, false);
+        let text = settings_text_with_bindings(&settings, 1, [1280, 720], false, 0, false, 0);
         let selected_text = text
             .vertices
             .iter()
@@ -2077,7 +2096,7 @@ mod tests {
     fn sensitivity_slider_stays_clear_of_its_value_text() {
         let settings = crate::persistence::GameSettings::default();
         let aspect = 16.0 / 9.0;
-        let text = settings_text_with_bindings(&settings, 1, [1280, 720], false, 0, false);
+        let text = settings_text_with_bindings(&settings, 1, [1280, 720], false, 0, false, 0);
         let value_start_x = text
             .vertices
             .iter()
@@ -2346,7 +2365,7 @@ mod tests {
     fn resume_and_change_mode_highlights_cover_the_full_text_height() {
         for (selected, expected_min_y, expected_max_y, color) in [
             (0, 0.44, 0.50, [0.92, 0.48, 0.16, 0.22]),
-            (22, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
+            (23, -0.51, -0.45, [0.92, 0.48, 0.16, 0.22]),
         ] {
             let mut mesh = crate::Scene {
                 vertices: Vec::new(),

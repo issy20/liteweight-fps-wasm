@@ -208,11 +208,13 @@ struct App {
     settings: GameSettings,
     tracking_bot_count: u32,
     session: SessionMode,
+    profile: u8,
     records: Records,
     session_started: Option<Instant>,
     result_screen: bool,
     result_new_best: bool,
     result_seconds: f32,
+    credits_screen: bool,
     title_screen: bool,
     settings_menu: bool,
     settings_from_title: bool,
@@ -311,7 +313,12 @@ impl App {
         event_loop.exit();
     }
     fn adjust_runtime_setting(&mut self, setting: usize, direction: f32) {
-        if setting == 3 && !self.settings_from_title && self.session == SessionMode::TrackingAim {
+        if setting == 16 {
+            self.change_profile(direction);
+        } else if setting == 3
+            && !self.settings_from_title
+            && self.session == SessionMode::TrackingAim
+        {
             self.tracking_bot_count =
                 (self.tracking_bot_count as f32 + direction.signum()).clamp(1.0, 5.0) as u32;
         } else {
@@ -332,10 +339,34 @@ impl App {
         self.notice = Some((message.to_owned(), Instant::now()));
     }
     fn save_settings(&mut self) {
-        match self.settings.save() {
+        match self.settings.save(self.profile) {
             Ok(()) => self.notice = None,
             Err(error) => self.set_notice("SETTINGS NOT SAVED - CHECK STORAGE", &error),
         }
+    }
+    /// Switches to another settings/records profile, applying it immediately.
+    fn change_profile(&mut self, direction: f32) {
+        if direction == 0.0 {
+            return;
+        }
+        self.save_settings();
+        let next = (i32::from(self.profile) + direction.signum() as i32)
+            .rem_euclid(i32::from(crate::persistence::PROFILE_COUNT)) as u8;
+        if next == self.profile {
+            return;
+        }
+        self.profile = next;
+        crate::persistence::save_active_profile(self.profile);
+        self.settings = GameSettings::load(self.profile);
+        self.records = Records::load(self.profile);
+        self.tracking_bot_count = self.settings.bot_count.min(5);
+        if let Some(audio) = &mut self.audio {
+            audio.set_volume(self.settings.volume);
+        }
+        self.apply_fullscreen();
+        self.apply_runtime_setting(3);
+        self.apply_runtime_setting(9);
+        self.next_frame_deadline = None;
     }
     /// Retries capture when requested. Expected to run after focus is settled.
     /// Requests a pointer lock. Web browsers grant it asynchronously and may
@@ -445,7 +476,7 @@ impl App {
             headshot_rate: self.combat.headshot_rate(),
         };
         self.result_new_best = self.records.submit(self.session, result);
-        if let Err(error) = self.records.save() {
+        if let Err(error) = self.records.save(self.profile) {
             self.set_notice("RESULTS NOT SAVED - CHECK STORAGE", &error);
         }
         self.result_seconds = seconds;
@@ -1221,6 +1252,7 @@ impl ApplicationHandler for App {
                             self.settings_from_title,
                             self.binding_selection,
                             self.waiting_for_binding,
+                            self.profile,
                         )
                     } else {
                         crate::ui::game_hud_text_into(
@@ -1325,9 +1357,21 @@ pub fn run() {
         show_fallback();
         return;
     }
-    let settings = GameSettings::load();
+    let profile = crate::persistence::load_active_profile();
+    let settings = GameSettings::load(profile);
     let tracking_bot_count = settings.bot_count.min(5);
     let arena_scale = world::arena_scale_for_bot_count(settings.bot_count);
+    // Show a one-time notice when the stored version differs (first run or update).
+    let seen_version = crate::persistence::load_seen_version();
+    let notice = (seen_version.as_deref() != Some(crate::VERSION)).then(|| {
+        let message = if seen_version.is_some() {
+            format!("UPDATED TO v{}", crate::VERSION)
+        } else {
+            format!("WELCOME TO v{}", crate::VERSION)
+        };
+        (message, Instant::now())
+    });
+    crate::persistence::save_seen_version(crate::VERSION);
     let app = App {
         renderer: None,
         pending: None,
@@ -1352,11 +1396,13 @@ pub fn run() {
         settings,
         tracking_bot_count,
         session: SessionMode::FreeTraining,
-        records: Records::load(),
+        profile,
+        records: Records::load(profile),
         session_started: None,
         result_screen: false,
         result_new_best: false,
         result_seconds: 0.0,
+        credits_screen: false,
         title_screen: true,
         settings_menu: false,
         settings_from_title: false,
@@ -1376,7 +1422,7 @@ pub fn run() {
         occluded: false,
         suspended: false,
         error: None,
-        notice: None,
+        notice,
     };
     let event_loop = EventLoop::builder().build().expect("event loop");
     event_loop.spawn_app(app);

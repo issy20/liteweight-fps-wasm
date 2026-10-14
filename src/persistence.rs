@@ -42,12 +42,37 @@ pub fn crosshair_color_rgb(index: u8) -> [f32; 3] {
     CROSSHAIR_RGB[usize::from(index.min(CROSSHAIR_COLORS.len() as u8 - 1))]
 }
 
-/// `localStorage` key used by the web build for settings.
+/// Number of independent settings/records profiles.
+pub const PROFILE_COUNT: u8 = 3;
+/// `localStorage` key prefix used by the web build for settings.
 #[cfg(target_arch = "wasm32")]
-const STORAGE_KEY: &str = "liteweight-fps/settings.json";
-/// `localStorage` key used by the web build for best records.
+const STORAGE_KEY_PREFIX: &str = "liteweight-fps/settings";
+/// `localStorage` key prefix used by the web build for best records.
 #[cfg(target_arch = "wasm32")]
-const RECORDS_KEY: &str = "liteweight-fps/records.json";
+const RECORDS_KEY_PREFIX: &str = "liteweight-fps/records";
+/// `localStorage` key for the active profile index.
+#[cfg(target_arch = "wasm32")]
+const PROFILE_KEY: &str = "liteweight-fps/profile";
+/// `localStorage` key for the last seen application version.
+#[cfg(target_arch = "wasm32")]
+const VERSION_KEY: &str = "liteweight-fps/version";
+
+/// Clamps a profile index to the valid range.
+pub fn clamp_profile(profile: u8) -> u8 {
+    profile.min(PROFILE_COUNT - 1)
+}
+
+/// `localStorage` key for a profile's settings.
+#[cfg(target_arch = "wasm32")]
+fn settings_key(profile: u8) -> String {
+    format!("{STORAGE_KEY_PREFIX}-{}.json", clamp_profile(profile))
+}
+
+/// `localStorage` key for a profile's records.
+#[cfg(target_arch = "wasm32")]
+fn records_key(profile: u8) -> String {
+    format!("{RECORDS_KEY_PREFIX}-{}.json", clamp_profile(profile))
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -452,9 +477,9 @@ impl GameSettings {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn load() -> Self {
-        let Some(json) =
-            web_storage().and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten())
+    pub fn load(profile: u8) -> Self {
+        let key = settings_key(profile);
+        let Some(json) = web_storage().and_then(|storage| storage.get_item(&key).ok().flatten())
         else {
             return Self::default();
         };
@@ -462,12 +487,12 @@ impl GameSettings {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self, profile: u8) -> Result<(), String> {
         let storage =
             web_storage().ok_or_else(|| "設定保存先(localStorage)を利用できません".to_owned())?;
         let data = serde_json::to_string(self).map_err(|e| e.to_string())?;
         storage
-            .set_item(STORAGE_KEY, &data)
+            .set_item(&settings_key(profile), &data)
             .map_err(|_| "設定の保存に失敗しました".to_owned())
     }
 }
@@ -518,9 +543,9 @@ impl Records {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn load() -> Self {
-        let Some(json) =
-            web_storage().and_then(|storage| storage.get_item(RECORDS_KEY).ok().flatten())
+    pub fn load(profile: u8) -> Self {
+        let key = records_key(profile);
+        let Some(json) = web_storage().and_then(|storage| storage.get_item(&key).ok().flatten())
         else {
             return Self::default();
         };
@@ -528,13 +553,46 @@ impl Records {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self, profile: u8) -> Result<(), String> {
         let storage =
             web_storage().ok_or_else(|| "記録保存先(localStorage)を利用できません".to_owned())?;
         let data = serde_json::to_string(self).map_err(|e| e.to_string())?;
         storage
-            .set_item(RECORDS_KEY, &data)
+            .set_item(&records_key(profile), &data)
             .map_err(|_| "記録の保存に失敗しました".to_owned())
+    }
+}
+
+/// Reads the persisted active profile index (defaults to 0).
+#[cfg(target_arch = "wasm32")]
+pub fn load_active_profile() -> u8 {
+    let Some(value) =
+        web_storage().and_then(|storage| storage.get_item(PROFILE_KEY).ok().flatten())
+    else {
+        return 0;
+    };
+    clamp_profile(value.parse().unwrap_or(0))
+}
+
+/// Persists the active profile index.
+#[cfg(target_arch = "wasm32")]
+pub fn save_active_profile(profile: u8) {
+    if let Some(storage) = web_storage() {
+        let _ = storage.set_item(PROFILE_KEY, &clamp_profile(profile).to_string());
+    }
+}
+
+/// Reads the last application version recorded on this origin.
+#[cfg(target_arch = "wasm32")]
+pub fn load_seen_version() -> Option<String> {
+    web_storage().and_then(|storage| storage.get_item(VERSION_KEY).ok().flatten())
+}
+
+/// Records the current application version.
+#[cfg(target_arch = "wasm32")]
+pub fn save_seen_version(version: &str) {
+    if let Some(storage) = web_storage() {
+        let _ = storage.set_item(VERSION_KEY, version);
     }
 }
 
@@ -606,15 +664,16 @@ mod native {
     }
 
     impl GameSettings {
-        pub fn load() -> Self {
-            let Some(path) = Self::path() else {
+        pub fn load(profile: u8) -> Self {
+            let Some(path) = settings_path(profile) else {
                 return Self::default();
             };
             Self::load_from(&path)
         }
 
-        pub fn save(&self) -> Result<(), String> {
-            let path = Self::path().ok_or_else(|| "設定保存先を特定できません".to_owned())?;
+        pub fn save(&self, profile: u8) -> Result<(), String> {
+            let path =
+                settings_path(profile).ok_or_else(|| "設定保存先を特定できません".to_owned())?;
             Self::save_to(&path, self)
         }
 
@@ -632,15 +691,11 @@ mod native {
             let data = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
             write_file_atomically(path, &data).map_err(|e| e.to_string())
         }
-
-        fn path() -> Option<PathBuf> {
-            Some(config_root()?.join("liteweight-fps").join("settings.json"))
-        }
     }
 
     impl super::Records {
-        pub fn load() -> Self {
-            let Some(path) = records_path() else {
+        pub fn load(profile: u8) -> Self {
+            let Some(path) = records_path(profile) else {
                 return Self::default();
             };
             fs::read_to_string(path)
@@ -649,8 +704,9 @@ mod native {
                 .unwrap_or_default()
         }
 
-        pub fn save(&self) -> Result<(), String> {
-            let path = records_path().ok_or_else(|| "記録保存先を特定できません".to_owned())?;
+        pub fn save(&self, profile: u8) -> Result<(), String> {
+            let path =
+                records_path(profile).ok_or_else(|| "記録保存先を特定できません".to_owned())?;
             let parent = path
                 .parent()
                 .ok_or_else(|| "記録保存先が不正です".to_owned())?;
@@ -660,8 +716,20 @@ mod native {
         }
     }
 
-    fn records_path() -> Option<PathBuf> {
-        Some(config_root()?.join("liteweight-fps").join("records.json"))
+    fn settings_path(profile: u8) -> Option<PathBuf> {
+        Some(
+            config_root()?
+                .join("liteweight-fps")
+                .join(format!("settings-{}.json", super::clamp_profile(profile))),
+        )
+    }
+
+    fn records_path(profile: u8) -> Option<PathBuf> {
+        Some(
+            config_root()?
+                .join("liteweight-fps")
+                .join(format!("records-{}.json", super::clamp_profile(profile))),
+        )
     }
 
     fn config_root() -> Option<PathBuf> {
@@ -723,6 +791,14 @@ mod native {
 mod tests {
     use super::{GameSettings, ModeRecord, Records};
     use crate::simulation::game_mode::SessionMode;
+
+    #[test]
+    fn profile_index_is_clamped_to_the_available_slots() {
+        use super::{clamp_profile, PROFILE_COUNT};
+        assert_eq!(clamp_profile(0), 0);
+        assert_eq!(clamp_profile(PROFILE_COUNT - 1), PROFILE_COUNT - 1);
+        assert_eq!(clamp_profile(200), PROFILE_COUNT - 1);
+    }
 
     #[test]
     fn crosshair_defaults_use_the_reference_geometry() {
