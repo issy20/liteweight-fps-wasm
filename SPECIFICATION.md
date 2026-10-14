@@ -78,6 +78,12 @@ index.html / Trunk.toml         ホストページとビルド設定
   | `#fallback` | WebGPU 非対応の案内 | 既定 `none`。`navigator.gpu` 不在時に表示し、ゲームを起動しない |
   | `#touch-notice` | デスクトップ専用の案内 | `@media (pointer: coarse) and (hover: none)` で表示 |
 - ローディング中・エラー中もキャンバスは背面に存在するが、オーバーレイが覆う。
+- PWA: `manifest.webmanifest`（`display: fullscreen`、`icon-192.png` / `icon-512.png`）と
+  `sw.js` を `data-trunk rel="copy-file"` で配信ルートへコピーする。`index.html` で
+  Service Worker を登録し、初回読込後にオフライン起動できる（ハッシュ付きアセットは
+  実行時キャッシュ、ドキュメントは network-first）。配信は HTTPS が必要。
+- クレジット/ライセンス: `credits.html` と `LICENSE-MIT` / `LICENSE-APACHE` /
+  `assets/fonts/OFL.txt`（配信ルートへ `OFL.txt` としてコピー）も同梱する。
 
 ### 3.2 時刻と乱数シード（platform.rs）
 - `Instant` / `SystemTime` / `Duration` / `UNIX_EPOCH` は `web_time` を再エクスポート
@@ -104,8 +110,11 @@ index.html / Trunk.toml         ホストページとビルド設定
 - ロード時 `from_json` で値域検証し、不正なら既定値へフォールバック。
   `#[serde(default)]` のため未知キーは無視され、欠落フィールドは既定値になる。
 - ベスト記録 `Records`（モード別の `kills` / `accuracy` / `headshot_rate`）は別キー
-  `liteweight-fps/records.json` に保存。`submit` は指標ごとに最大値を保持し、改善が
-  あれば `true` を返す。
+  `liteweight-fps/records-{n}.json` に保存（§13.3 のプロファイル単位）。`submit` は
+  指標ごとに最大値を保持し、改善があれば `true` を返す。
+- バージョン告知: 直近に記録した `liteweight-fps/version` と `VERSION`
+  （`env!("CARGO_PKG_VERSION")`）を比較し、初回は `WELCOME TO vX`、更新時は
+  `UPDATED TO vX` を通知（8 秒）。現在のバージョンはタイトル画面下部にも表示する。
 
 ---
 
@@ -442,11 +451,12 @@ HS=ヘッドショット率）。下端に移動・射撃・リロード・武�
   足。被弾フラッシュ時は色が明るくなる。yaw で回転。
 
 ### 12.4 タイトルメニュー
-- 3 項目: `FREE TRAINING` / `TRACKING AIM` / `SETTINGS`。
+- 4 項目: `FREE TRAINING` / `TRACKING AIM` / `SETTINGS` / `CREDITS`。
 - 選択項目をオレンジでハイライト。
+- 下端に操作ヒント（`UP / DOWN MOVE   ENTER SELECT`）とバージョン `vX.Y.Z` を表示。
 
 ### 12.5 ポーズ／設定メニュー
-- 23 行、スクロール窓（同時表示 11 行、行間 0.095、上端 0.49）。
+- 24 行、スクロール窓（同時表示 11 行、行間 0.095、上端 0.49）。
 - 行一覧（インデックス順）:
 
 | # | ラベル | 種別 | 対応設定 |
@@ -473,7 +483,8 @@ HS=ヘッドショット率）。下端に移動・射撃・リロード・武�
 | 19 | BOT HP | 調整 | adjust 6 |
 | 20 | BOT SPEED | 調整 | adjust 7 |
 | 21 | BOT RESPAWN | 調整 | adjust 8 |
-| 22 | CHANGE MODE / BACK TO MENU | 実行 | モード変更/戻る |
+| 22 | PROFILE | 調整 | adjust 16 |
+| 23 | CHANGE MODE / BACK TO MENU | 実行 | モード変更/戻る |
 
 - 左/右で調整、Enter で決定（トグル/実行）、Home で既定値へ戻す。
 - スライダー表示: MOUSE SENSITIVITY / ADS SENSITIVITY / SOUND VOLUME /
@@ -503,6 +514,15 @@ HS=ヘッドショット率）。下端に移動・射撃・リロード・武�
   `KILLS / ACCURACY / HEADSHOTS / TIME`（縦センター揃え・0.07 間隔）、
   ベスト更新時は `NEW BEST`、最下段に `PRESS ENTER FOR TITLE`。
 - Enter / Esc でタイトルへ戻る。
+
+### 12.9 クレジット画面
+- タイトルの `CREDITS` から開く（`credits_screen`、タイトル／リザルトと排他）。
+- `credits_overlay(mesh, aspect)`: 減光＋中央パネル（`x=-0.52..0.52`、`y=-0.38..0.30`）。
+- `credits_text(mesh, viewport)`: 先頭で `mesh.clear()`。`CREDITS`、`GAME`（MIT OR
+  Apache-2.0）、`FONT`（Cantarell / SIL Open Font License）、`ENGINE`
+  （wgpu/winit/glam/ab_glyph/serde）、`PRIVACY`（localStorage のみ・トラッキングなし）、
+  `LICENSES`（同梱ファイル名）、操作ヒント、バージョン。
+- Esc でタイトルへ戻る。Enter で同梱の `credits.html` を別タブで開く（全文ライセンス閲覧用）。
 
 ---
 
@@ -538,8 +558,18 @@ HS=ヘッドショット率）。下端に移動・射撃・リロード・武�
   `5` 音量 / `6` BOT HP / `7` BOT 速度 / `8` BOT リスポーン /
   `9` 内部解像度 / `10` FPS 制限 / `11` ヒットマーカー強度 /
   `12` クロスヘア長 / `13` クロスヘア間隔 / `14` クロスヘア太さ / `15` クロスヘア色。
+  `12` クロスヘア長 / `13` クロスヘア間隔 / `14` クロスヘア太さ / `15` クロスヘア色 /
+  `16` プロファイル（`GameSettings` ではなくアプリが処理）。
 - トグルインデックス（`toggle_setting`）:
   `0` 無限弾薬 / `1` フルスクリーン / `2` Y 反転 / `3` クロスヘアドット。
+
+### 13.3 プロファイル
+- 設定とベスト記録は 3 つのプロファイル（`PROFILE_COUNT`）で独立に保存する。
+- Web: `localStorage` の `liteweight-fps/settings-{n}.json` / `records-{n}.json`。
+  ネイティブ: 設定ディレクトリの `settings-{n}.json` / `records-{n}.json`。
+- 使用中のプロファイル番号は `liteweight-fps/profile` に保存。
+- 設定メニューの `PROFILE` 行（adjust 16）で切替。切替時は現在の設定を保存し、
+  新しいプロファイルの設定・記録を読み込み、音量/フルスクリーン/内部解像度/BOT を再適用する。
 
 ### 13.2 削除された設定（Web では不要）
 - **DISPLAY RESOLUTION**: キャンバスが常にビューポート全体のため `request_inner_size` が
@@ -623,7 +653,7 @@ trunk build --release
 
 ## 17. テスト
 
-- ネイティブ `cargo test` で純粋ロジックを検証（現状 48 件）。
+- ネイティブ `cargo test` で純粋ロジックを検証（現状 50 件）。
   対象: game_mode、weapon/combat/bot のロジック、ui のジオメトリ（タイトル／設定／
   捕捉待ちオーバーレイを含む）、persistence（ファイル経路）、audio（合成）、
   text（アトラス）、physics など。
