@@ -40,6 +40,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          preCommands: >-
+            npx wrangler pages project list | grep -q "liteweight-fps-wasm"
+            || npx wrangler pages project create liteweight-fps-wasm --production-branch=main
           command: >-
             pages deploy dist --project-name=liteweight-fps-wasm
             --branch=${{ github.head_ref || github.ref_name }}
